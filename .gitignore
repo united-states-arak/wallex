@@ -1,9 +1,9 @@
 node_modules/
-data/
-logs/
+/data/
+/logs/
+/state/
+/control/
 .env
-state/
-STOP
+/STOP
 .fx/
-control/
 config/local.toml
