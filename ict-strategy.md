@@ -372,8 +372,18 @@ Each candidate trade receives a score; trade only if score ≥ threshold.
 > ICT's own teaching stresses small, consistent risk and patience. The numbers below are conservative defaults for an automated agent, **not** ICT quotes.
 
 ### 11.1 Position sizing
-`position_size = (account_equity × RISK_PER_TRADE) / (entry − stop)`
-- **[PARAM]** `RISK_PER_TRADE = 0.5%` of equity (hard maximum **1%**).
+Size is derived from the stop so that a stop-out loses **exactly `RISK_PER_TRADE` of equity**, all costs included:
+
+```text
+s    = (entry - stop) / entry
+cost = s + MAKER_FEE + (1 - s) * TAKER_FEE + SLIPPAGE      # fraction of position value lost at the stop
+N    = min( equity * RISK_PER_TRADE / cost , MAX_POSITION_PCT * equity )
+qty  = floor_to_step( N / entry )
+```
+- **[PARAM]** `RISK_PER_TRADE = 1%` of equity (this is the target loss at the stop, never exceeded; if the position cap binds, the loss is lower).
+- **[PARAM]** `MAX_POSITION_PCT = 50%` (the challenge scores "not entering with all the money").
+- **[PARAM]** `MAKER_FEE = 0.25%`, `TAKER_FEE = 0.3%`, `SLIPPAGE = 0.1%`.
+- Skip the trade if `N` is below the market's `minNotional`.
 - Position must respect exchange minimum order size and maximum leverage (none if spot).
 - Include **fees** in the risk calculation (entry + exit fees).
 
@@ -386,7 +396,7 @@ Each candidate trade receives a score; trade only if score ≥ threshold.
 
 ### 11.3 Stop-loss requirement
 - Every order **must** have a defined stop **before** it is placed. If the stop cannot be placed (e.g., exchange limitation on spot), the agent must implement it as a **monitored conditional exit** and treat connectivity loss as an emergency (Phase 2 design topic).
-- Maximum stop distance: **[PARAM]** `MAX_STOP_PCT = 1.5%` of entry price for crypto majors (reject setups that need wider stops).
+- Stop distance must be between **[PARAM]** `MIN_STOP_PCT = 1.0%` and `MAX_STOP_PCT = 2.5%` of entry price (reject setups outside this range). Tighter stops are dominated by the 0.5%+ round-trip fee.
 
 ### 11.4 Volatility / news filter (v1 simple version)
 - If the current 5m candle range > `4 × ATR(14)` or a 1H candle range > `3 × ATR(14)` → pause new entries for `30` minutes (abnormal event).
@@ -530,11 +540,13 @@ Also keep a **daily journal** (human readable): bias reasoning, setups seen, tra
 | `MIN_RR` | 2.0 | Minimum reward:risk to TP1 |
 | `TP1_PARTIAL` | 0.5 | Fraction closed at TP1 |
 | `MIN_SCORE` | 8 / 13 | A+ setup filter |
-| `RISK_PER_TRADE` | 0.5% (max 1%) | Equity risk per trade |
+| `RISK_PER_TRADE` | 1% | Loss at the stop as a share of equity, fees included |
+| `MAX_POSITION_PCT` | 50% | Cap on position value as a share of equity |
 | `MAX_TRADES_PER_DAY` | 2 | Overtrading guard |
 | `MAX_DAILY_LOSS` | 1.5% | Daily stop |
 | `MAX_WEEKLY_LOSS` | 4% | Weekly stop |
-| `MAX_STOP_PCT` | 1.5% | Reject setups with wider stops |
+| `MAX_STOP_PCT` | 2.5% | Reject setups with wider stops |
+| `MIN_STOP_PCT` | 1.0% | Reject setups with tighter stops (fees dominate) |
 | `MAX_SPREAD_BPS` | 8 | Instrument quality filter |
 | `SLIPPAGE_BPS` | 5 | Backtest realism |
 
