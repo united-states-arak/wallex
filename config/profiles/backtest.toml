@@ -1,0 +1,6 @@
+# backtest: for offline runs and research. No kill-switch file check, no metrics endpoint.
+[risk]
+killFile = ""           # ignore a STOP file left over from a live run
+
+[telemetry]
+enabled = false         # do not open the Prometheus port

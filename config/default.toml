@@ -1,0 +1,184 @@
+# starcoach-trader reference configuration: EVERY option with its built-in default.
+# Editing this file changes the defaults for everyone; put your own changes in config/local.toml
+# (gitignored) or pick a profile with STARCOACH_PROFILE=<name>. A test keeps this file equal to
+# src/settings/defaults.ts.
+#
+# Layers, lowest to highest: code defaults -> this file -> profiles/<name>.toml -> local.toml
+#   -> environment (STARCOACH__section__key=value, plus legacy variables) -> explicit overrides.
+# Fractions are decimals (0.01 = 1%). Secrets (WALLEX_API_KEY, AI_API_KEY) are environment-only and
+# must never appear in any .toml file: the loader refuses files that contain them.
+# Inspect the result with: bun run config show
+
+# ---------------------------------------------------------------- run schedule
+[run]
+end = ""                # ISO end time of the run, e.g. "2026-10-23T18:00:00Z"; empty = now + defaultHours. Env: RUN_END
+entryCutoffMin = 45     # minutes before the end when new entries stop. Env: ENTRY_CUTOFF_MIN
+flattenMin = 15         # minutes before the end when everything is sold to TMN. Env: FLATTEN_MIN
+defaultHours = 24       # run length in hours when `end` is empty
+
+# ---------------------------------------------------------------- Wallex API (key comes from WALLEX_API_KEY only)
+[wallex]
+baseUrl = "https://api.wallex.ir"  # REST base URL. Env: WALLEX_BASE_URL
+requestTimeoutMs = 10_000          # per-request timeout in milliseconds
+pollMs = 20_000                    # milliseconds between candle polls
+tickMs = 5_000                     # milliseconds between daemon ticks (stop monitoring, schedule checks)
+warmupHours = 24                   # hours of 1m history loaded before live polling starts (max 36)
+
+# ---------------------------------------------------------------- fees (fractions of traded value)
+[fees]
+maker = 0.0025          # maker fee, 0.25%. Env: MAKER_FEE
+taker = 0.003           # taker fee, 0.3%. Env: TAKER_FEE
+
+# ---------------------------------------------------------------- paper / backtest assumptions
+[paper]
+spreadBps = 10          # assumed bid/ask spread around a candle close, basis points. Env: PAPER_SPREAD_BPS
+slippageBps = 10        # slippage on marketable paper orders, basis points. Env: PAPER_SLIPPAGE_BPS
+startTmn = 5_000_000    # starting TMN balance for paper, backtest and dry runs. Env: START_TMN
+
+# ---------------------------------------------------------------- markets
+[market]
+symbols = ["PEPETMN", "PUMPTMN", "DOGETMN"]  # symbols traded when none are given on the command line. Env: SYMBOLS (comma separated)
+blockedFile = "config/blocked-markets.txt"   # one blocked symbol per line; orders on them are refused
+
+[market.universe]       # automatic symbol selection (`--symbols auto`)
+auto = false            # use the universe instead of `symbols` by default (read by the CLI)
+minVolTmn = 3_000_000_000  # minimum 24h volume in TMN
+maxSpreadPct = 0.01     # maximum bid/ask spread as a fraction of bid
+minRangePct = 0.03      # minimum 24h (high - low) / low
+max = 12                # keep at most this many symbols, best first
+exclude = []            # extra symbols never selected, on top of the blocked file
+
+# ---------------------------------------------------------------- risk and guard
+[risk]
+riskPct = 0.01          # equity lost if a stop is hit, per trade (max 0.05). Env: RISK_PCT
+maxPositionPct = 0.5    # a position may be at most this share of equity
+slippagePct = 0.001     # slippage allowance used in position sizing and net-RR checks
+maxPositions = 2        # open positions plus pending entries at the same time
+dayLossHalt = 0.12      # halt entries for the UTC day when equity falls this far below the day peak. Env: DAILY_LOSS_HALT
+hardDrawdown = 0.3      # halt for good when equity falls this far below the start equity. Env: HARD_DRAWDOWN
+lossStreak = 3          # consecutive losing trades that trigger a pause. Env: LOSS_STREAK
+lossPauseMin = 30       # length of that pause in minutes. Env: LOSS_PAUSE_MIN
+maxEntriesPerHour = 6   # new entries allowed per rolling hour. Env: MAX_ENTRIES_PER_HOUR
+killFile = "STOP"       # creating this file stops new entries; relative to the repo root; empty disables the check
+
+# Profit locks: once total PnL reaches `pnl`, per-trade risk drops to `riskPct`. At most 2 tiers, ascending pnl.
+# Env: LOCK1_PNL, LOCK1_RISK, LOCK2_PNL, LOCK2_RISK
+[[risk.lockTiers]]
+pnl = 0.15
+riskPct = 0.005
+
+[[risk.lockTiers]]
+pnl = 0.3
+riskPct = 0.0025
+
+# ---------------------------------------------------------------- ICT strategy execution
+[strategy.ict]
+maxSpreadPct = 0.01     # skip a setup when the live spread is wider than this fraction
+minNetRr = 1.5          # minimum reward:risk after fees and slippage
+tp1Fraction = 0.5       # share of the position sold at TP1 (the rest goes to TP2)
+timeStopBars = 240      # exit a position still below entry after this many 1m bars
+stopExitSlip = 0.005    # first stop-exit limit sits this far below the bid; widens by this each retry
+stopExitSlipMax = 0.12  # the stop-exit limit never goes further below the bid than this
+breakEvenBuffer = 0.006 # after TP1 the stop moves to entry * (1 + this), about the round-trip fees
+
+# ---------------------------------------------------------------- setup detector (src/ict)
+[detect]
+swingN = 1                      # bars each side that confirm a swing high/low
+minFvgAtr = 0.15                # fair value gap must be at least this many ATR
+displacementAtr = 1.5           # displacement body must be at least this many ATR
+minSweepDepthPct = 0.0002       # a liquidity sweep must pierce the level by this fraction of price
+oteLow = 0.62                   # optimal trade entry zone, lower retracement fraction
+oteHigh = 0.79                  # optimal trade entry zone, upper retracement fraction
+stopBufferAtr = 0.05            # stop sits this many ATR below the swept low
+minStopPct = 0.01               # smallest allowed stop distance as a fraction of entry
+maxStopPct = 0.025              # largest allowed stop distance as a fraction of entry
+setupMaxAgeBars1m = 180         # a pending entry expires after this many 1m bars
+minScore = 4                    # minimum confluence score (0-9) to accept a setup
+models = ["sweep", "continuation"]  # which setup models run: sweep, continuation
+minGrossRr = 2                  # TP1 must give at least this gross reward:risk
+scanTimeframes = [5, 15]        # timeframes in minutes the scans run on (1, 5, 15)
+continuationMaxPullbackBars = 16  # max scan bars between the BOS candle and now (continuation model)
+shortSwingLevels = true         # also use 15m and 5m swing lows as rank-0 sweep levels and targets
+freshnessUseClose = true        # true: a zone is used up only by a 1m close below it; false: a wick is enough
+atrPeriod = 14                  # bars in the simple-average ATR
+atrFloorPct = 0.001             # ATR never counts as less than this fraction of price
+bodyRatio = 0.6                 # displacement body must be at least this fraction of its candle range
+eqlTolPct = 0.001               # equal highs/lows tolerance, fraction of price...
+eqlTolAtr = 0.15                # ...or this many ATR, whichever is larger
+max1mBars = 4000                # the detector looks at the most recent N 1m bars only
+minBars1m = 300                 # fewer 1m bars than this: no setup
+window1m = 1500                 # bars kept for the 1m scan
+window5m = 600                  # bars kept for the 5m scan
+window15m = 400                 # bars kept for the 15m scan and swing structure
+window1h = 200                  # 1H bars kept for bias and daily/session levels
+legMax1m = 30                   # max bars from sweep to structure shift on the 1m scan
+legMax5m = 12                   # same on the 5m scan
+legMax15m = 8                   # same on the 15m scan
+mssRefBack = 24                 # swing high broken by the MSS may be at most this many scan bars before the sweep
+bosRefBack = 60                 # swing high broken by a continuation BOS may be at most this many scan bars back
+htfBiasBars = 8                 # 1H bars averaged for the bullish bias check
+sessionStartHour = 7            # UTC hour (inclusive) where the session score point starts
+sessionEndHour = 21             # UTC hour (exclusive) where it ends
+strongDisplacementAtr = 2       # displacement of at least this many ATR earns one score point
+deepDiscountPos = 0.3           # entry at or below this place in the dealing range (0 low, 1 high) earns one point
+strongRr = 3                    # gross RR of at least this earns one score point
+
+# ---------------------------------------------------------------- AI supervisor (key comes from AI_API_KEY only)
+[ai]
+enabled = true          # false forces the built-in mock supervisor (approves everything)
+baseUrl = ""            # OpenAI-compatible endpoint; empty = mock supervisor. Env: AI_BASE_URL
+model = "gpt-4o-mini"   # model name. Env: AI_MODEL
+timeoutMs = 12_000      # review deadline in milliseconds. Env: AI_TIMEOUT_MS
+failMode = "approve"    # on timeout or error: "approve" the setup unchanged or "veto" it. Env: AI_FAIL_MODE
+newsTtlMin = 15         # minutes a news digest is cached
+newsTimeoutMs = 8_000   # timeout per news request in milliseconds
+newsWaitMs = 2_500      # most the supervisor waits for the digest before judging without it (capped at timeoutMs / 3)
+fearGreedUrl = "https://api.alternative.me/fng/?limit=1"
+trendingUrl = "https://api.coingecko.com/api/v3/search/trending"
+maxHeadlines = 15       # newest headlines kept in the digest
+contextWindow = 128_000 # model context window in tokens
+instructionsFile = ""   # optional path of a text file that replaces the built-in supervisor system prompt
+
+[[ai.feeds]]            # RSS/Atom headline sources
+source = "CoinDesk"
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+
+[[ai.feeds]]
+source = "Cointelegraph"
+url = "https://cointelegraph.com/rss"
+
+# ---------------------------------------------------------------- pullout (convert everything to TMN)
+[pullout]
+slippageSteps = [0.002, 0.004, 0.008, 0.015, 0.03, 0.05, 0.08, 0.12]  # sell limit sits this far below the bid, one step per retry round
+waitMs = 2_500          # milliseconds to wait for fills before cancelling and retrying
+
+# ---------------------------------------------------------------- research (walk-forward)
+[research]
+trainSplit = 0.57       # share of the window used for training
+minTrainTrades = 5      # a variant needs this many train trades to be picked on return
+warmupHours = 12        # hours of earlier bars given to the detector before the test window
+defaultDays = 7         # window length when --days is not given
+
+# ---------------------------------------------------------------- data and logging
+[data]
+dataDir = "data"                # candle cache folder
+cacheCompleteAfterSec = 300     # a day is cached only once it ended this many seconds ago
+historyBars = 3000              # 1m bars of history kept per symbol while running
+
+[logging]
+dir = "logs"            # JSONL decision logs
+stateDir = "state"      # daemon and guard state files
+
+# ---------------------------------------------------------------- telemetry (defined; wired by the telemetry module)
+[telemetry]
+enabled = true                  # false disables metrics. Env: OTEL_SDK_DISABLED=true also disables
+prometheusPort = 9464           # Prometheus scrape port. Env: OTEL_PROMETHEUS_PORT
+prometheusHost = "127.0.0.1"    # Prometheus bind address. Env: OTEL_PROMETHEUS_HOST
+otlpEndpoint = ""               # OTLP/HTTP metrics endpoint, no credentials; empty = off. Env: OTEL_EXPORTER_OTLP_ENDPOINT
+otlpIntervalMs = 10_000         # OTLP export interval in milliseconds
+
+# ---------------------------------------------------------------- dashboard (defined; wired by the dashboard module)
+[dashboard]
+host = "127.0.0.1"      # bind address
+port = 8787             # listen port
+root = ""               # folder holding logs/ and state/ to show; empty = repo root. Env: DASHBOARD_ROOT

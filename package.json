@@ -1,0 +1,34 @@
+{
+  "name": "starcoach-trader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "bun src/cli.ts check",
+    "backtest": "bun src/cli.ts backtest",
+    "shadow": "bun src/cli.ts shadow",
+    "dry": "bun src/cli.ts dry",
+    "pullout": "bun src/cli.ts pullout",
+    "live": "bun src/cli.ts live",
+    "research": "bun src/research/walk.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "config": "bun src/settings/cli.ts",
+    "dashboard": "bun src/dashboard/server.ts",
+    "ops:up": "docker compose -f ops/docker-compose.yml up -d",
+    "ops:down": "docker compose -f ops/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.300.0",
+    "@opentelemetry/exporter-prometheus": "^0.300.0",
+    "@opentelemetry/resources": "^3.0.0",
+    "@opentelemetry/sdk-metrics": "^3.0.0",
+    "@t3-oss/env-core": "^0.13.11",
+    "libfx": "0.0.14",
+    "zod": "^4.1.0"
+  }
+}

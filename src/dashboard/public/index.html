@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#080b12">
+<title>Starcoach · Mission control</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-overview" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></symbol>
+  <symbol id="i-positions" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z"/><path d="M3.5 12.5L12 17l8.5-4.5"/><path d="M3.5 16.5L12 21l8.5-4.5"/></symbol>
+  <symbol id="i-setups" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.2"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/></symbol>
+  <symbol id="i-ai" viewBox="0 0 24 24"><path d="M12 3l2.3 6.2L20.5 11.5l-6.2 2.3L12 20l-2.3-6.2L3.5 11.5l6.2-2.3z"/></symbol>
+  <symbol id="i-trades" viewBox="0 0 24 24"><path d="M7 19V6M7 6L3.5 9.5M7 6l3.5 3.5"/><path d="M17 5v13M17 18l-3.5-3.5M17 18l3.5-3.5"/></symbol>
+  <symbol id="i-system" viewBox="0 0 24 24"><path d="M2.5 12.5h4.2l2.3-6.5 4 12 2.3-5.5h6.2"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h9"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M6.8 6.8a7.5 7.5 0 1 0 10.4 0"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="banners" id="banners">
+<div id="kill-banner" class="banner kill" role="alert" hidden>
+  <span class="banner-icon" aria-hidden="true">■</span>
+  <div class="banner-text"><strong>Kill switch engaged.</strong> <span id="kill-note">The STOP file exists, so the guard refuses new entries and pending entries are cancelled.</span></div>
+  <button class="btn" id="kill-release" type="button">Release kill switch</button>
+</div>
+<div id="conn-banner" class="banner conn" role="status" hidden>
+  <span class="banner-icon" aria-hidden="true">⚠</span>
+  <div class="banner-text"><strong>Connection lost.</strong> <span id="conn-note">Showing the last data received. Retrying…</span></div>
+</div>
+</div>
+
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <a class="brand" href="#overview" aria-label="Starcoach, overview">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><circle cx="16" cy="16" r="13" class="b-ring"/><path class="b-star" d="M16 6.5l2.6 6.4 6.9.5-5.3 4.4 1.7 6.7L16 20.6l-5.9 3.9 1.7-6.7-5.3-4.4 6.9-.5z"/></svg>
+      <span class="brand-name">starcoach<small>mission control</small></span>
+    </a>
+    <ul class="nav-list">
+      <li><a href="#overview" data-nav="overview"><svg class="ic"><use href="#i-overview"/></svg><span>Overview</span></a></li>
+      <li><a href="#positions" data-nav="positions"><svg class="ic"><use href="#i-positions"/></svg><span>Positions</span><b class="count" id="nav-positions" hidden></b></a></li>
+      <li><a href="#setups" data-nav="setups"><svg class="ic"><use href="#i-setups"/></svg><span>Setups</span></a></li>
+      <li><a href="#ai" data-nav="ai"><svg class="ic"><use href="#i-ai"/></svg><span>AI</span></a></li>
+      <li><a href="#trades" data-nav="trades"><svg class="ic"><use href="#i-trades"/></svg><span>Trades</span></a></li>
+      <li><a href="#system" data-nav="system"><svg class="ic"><use href="#i-system"/></svg><span>System</span><b class="count warn" id="nav-errors" hidden></b></a></li>
+      <li><a href="#log" data-nav="log"><svg class="ic"><use href="#i-log"/></svg><span>Log</span></a></li>
+    </ul>
+    <p class="rail-hint">Keys <kbd>1</kbd>–<kbd>7</kbd> switch sections<br><kbd>/</kbd> searches the log</p>
+  </nav>
+
+  <div class="col">
+    <header class="top">
+      <div class="top-l">
+        <span class="badge mode" id="mode-badge" data-mode="none">NO RUN</span>
+        <span class="chip" id="phase-chip" data-tone="idle"><span aria-hidden="true">●</span> <span id="phase-text">Waiting</span></span>
+        <span class="health" id="health" data-level="idle" tabindex="0" role="status" aria-live="polite"><i class="dot" aria-hidden="true"></i><span id="health-text">No data</span></span>
+      </div>
+      <div class="top-r">
+        <span class="conn" id="conn-pill" data-state="connecting"><i class="dot" aria-hidden="true"></i><span id="conn-text">Connecting</span></span>
+        <button class="btn danger" id="kill-toggle" type="button"><svg class="ic" aria-hidden="true"><use href="#i-power"/></svg><span id="kill-toggle-text">Kill switch</span></button>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+
+      <section id="overview" class="view" aria-labelledby="h-overview">
+        <h1 id="h-overview" class="sr-only">Overview</h1>
+
+        <article class="card timeline" aria-label="Run timeline">
+          <div class="tl-clock">
+            <span class="muted tl-label" id="tl-label">Time to run end</span>
+            <span class="tl-time num" id="tl-time" aria-live="off">–</span>
+            <span class="tl-phase" id="tl-phase"></span>
+          </div>
+          <div class="tl-track-wrap">
+            <div class="tl-track" id="tl-track" role="img" aria-label="Run progress">
+              <i class="tl-seg trade" id="tl-trade"></i><i class="tl-seg cutoff" id="tl-cutoff"></i><i class="tl-seg flat" id="tl-flat"></i>
+              <i class="tl-fill" id="tl-fill"></i><i class="tl-now" id="tl-now"></i>
+            </div>
+            <div class="tl-marks" id="tl-marks"></div>
+          </div>
+        </article>
+
+        <div class="hero-grid">
+          <article class="card hero">
+            <header class="card-h"><h2>Equity</h2><span class="muted" id="eq-meta"></span></header>
+            <div class="hero-num"><span class="big num" id="eq-val">–</span><span class="unit">TMN</span></div>
+            <div class="hero-delta" id="eq-delta"><span class="muted">Waiting for the first heartbeat</span></div>
+            <dl class="mini">
+              <div><dt>Day PnL</dt><dd class="num" id="eq-day">–</dd></div>
+              <div><dt>Drawdown from peak</dt><dd class="num" id="eq-dd">–</dd></div>
+              <div><dt>Peak</dt><dd class="num" id="eq-peak">–</dd></div>
+              <div><dt>Start</dt><dd class="num" id="eq-start">–</dd></div>
+            </dl>
+            <div class="eq" id="eq-chart"><p class="empty-inline">The equity curve appears after two heartbeats.</p></div>
+            <p class="legend"><span><i class="lg up" aria-hidden="true">▲</i> winning exit</span><span><i class="lg down" aria-hidden="true">▼</i> losing exit</span><span class="muted">Arrow keys inspect the curve</span></p>
+          </article>
+
+          <div class="side">
+          <article class="card limits">
+            <header class="card-h"><h2>Risk limits</h2><span class="muted" id="guard-meta"></span></header>
+            <div class="gauge-row">
+              <div id="g-day"></div>
+              <div id="g-dd"></div>
+              <div id="g-risk"></div>
+            </div>
+            <div class="guard-line" id="guard-line"></div>
+          </article>
+          <article class="card">
+            <header class="card-h"><h2>Recent activity</h2></header>
+            <ol class="feed activity" id="activity"></ol>
+          </article>
+          </div>
+        </div>
+
+        <div class="stat-row" id="stat-row"></div>
+
+      </section>
+
+      <section id="positions" class="view" aria-labelledby="h-positions" hidden>
+        <header class="view-h"><h1 id="h-positions">Positions &amp; pending entries</h1><p class="muted" id="pos-sub"></p></header>
+        <div class="cards" id="pos-cards"></div>
+        <article class="card">
+          <header class="card-h"><h2>Pending entries</h2><span class="muted">Limit buys waiting to fill</span></header>
+          <div id="pending"></div>
+        </article>
+        <article class="card">
+          <header class="card-h"><h2>Orders</h2><span class="muted">Latest intents and acknowledgements</span></header>
+          <div id="orders"></div>
+        </article>
+      </section>
+
+      <section id="setups" class="view" aria-labelledby="h-setups" hidden>
+        <header class="view-h"><h1 id="h-setups">Setups &amp; decisions</h1><p class="muted" id="setups-sub"></p></header>
+        <div class="two">
+          <article class="card">
+            <header class="card-h"><h2>Why setups were rejected</h2><span class="muted" id="reason-meta"></span></header>
+            <div id="reasons"></div>
+          </article>
+          <article class="card">
+            <header class="card-h"><h2>Outcome</h2></header>
+            <div id="setup-split"></div>
+          </article>
+        </div>
+        <article class="card">
+          <header class="card-h"><h2>Decision feed</h2><span class="muted">Newest first</span></header>
+          <div id="setup-feed"></div>
+        </article>
+      </section>
+
+      <section id="ai" class="view" aria-labelledby="h-ai" hidden>
+        <header class="view-h"><h1 id="h-ai">AI supervisor</h1><p class="muted" id="ai-sub"></p></header>
+        <div class="stat-row" id="ai-stats"></div>
+        <article class="card">
+          <header class="card-h"><h2>Verdicts</h2><span class="muted">The AI can shrink or veto a trade, never grow it</span></header>
+          <div id="ai-feed"></div>
+        </article>
+      </section>
+
+      <section id="trades" class="view" aria-labelledby="h-trades" hidden>
+        <header class="view-h"><h1 id="h-trades">Closed trades</h1><p class="muted" id="trades-sub"></p></header>
+        <div class="stat-row" id="trade-stats"></div>
+        <article class="card">
+          <header class="card-h"><h2>History</h2><span class="muted">PnL is a share of equity at entry. R is PnL divided by the initial risk.</span></header>
+          <div id="trade-table"></div>
+        </article>
+      </section>
+
+      <section id="system" class="view" aria-labelledby="h-system" hidden>
+        <header class="view-h"><h1 id="h-system">System health</h1><p class="muted" id="sys-sub"></p></header>
+        <div class="two">
+          <article class="card">
+            <header class="card-h"><h2>Market data freshness</h2><span class="muted">Age of the last 1-minute bar</span></header>
+            <div id="fresh"></div>
+          </article>
+          <article class="card">
+            <header class="card-h"><h2>Daemon</h2></header>
+            <div id="daemon"></div>
+          </article>
+        </div>
+        <div class="stat-row" id="err-stats"></div>
+        <article class="card">
+          <header class="card-h"><h2>Recent errors</h2><span class="muted">poll errors, API errors, rejected exits, degraded mode</span></header>
+          <div id="err-feed"></div>
+        </article>
+      </section>
+
+      <section id="log" class="view" aria-labelledby="h-log" hidden>
+        <header class="view-h"><h1 id="h-log">Decision log</h1><p class="muted" id="log-sub"></p></header>
+        <article class="card">
+          <form class="log-bar" id="log-form" role="search" onsubmit="return false">
+            <label class="field grow"><span>Search</span><input id="log-q" type="search" placeholder="symbol, reason, id…  ( / )" autocomplete="off" spellcheck="false"></label>
+            <label class="field"><span>Event</span><select id="log-event"><option value="">All events</option></select></label>
+            <label class="check"><input type="checkbox" id="log-follow" checked><span>Follow</span></label>
+          </form>
+          <div class="chips" id="log-chips" role="group" aria-label="Event families"></div>
+          <div id="log-list" class="log-list" tabindex="0" role="log" aria-label="Log entries"></div>
+        </article>
+      </section>
+
+    </main>
+
+    <footer class="foot">
+      <span>localhost only</span><span aria-hidden="true">·</span><span>read-only except the STOP switch</span><span aria-hidden="true">·</span><span>no authentication, never expose this port</span>
+      <span class="grow"></span><span id="src-note"></span>
+    </footer>
+  </div>
+</div>
+
+<dialog id="confirm" aria-labelledby="c-title" aria-describedby="c-body">
+  <form method="dialog">
+    <h2 id="c-title">Engage kill switch?</h2>
+    <div id="c-body" class="c-body"></div>
+    <div class="c-actions">
+      <button class="btn" value="cancel" id="c-cancel" autofocus>Cancel</button>
+      <button class="btn danger solid" value="ok" id="c-ok">Engage kill switch</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

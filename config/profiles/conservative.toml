@@ -1,0 +1,18 @@
+# conservative: half the risk per trade, one position at a time, earlier and tighter halts.
+[risk]
+riskPct = 0.005         # half of the default 1%
+maxPositions = 1        # one open position or pending entry
+dayLossHalt = 0.06      # default 0.12
+hardDrawdown = 0.15     # default 0.30
+lossStreak = 2          # default 3
+lossPauseMin = 60       # default 30
+maxEntriesPerHour = 3   # default 6
+
+# Lock profits earlier and shrink risk faster than the default tiers (arrays replace the default as a whole).
+[[risk.lockTiers]]
+pnl = 0.08
+riskPct = 0.0025
+
+[[risk.lockTiers]]
+pnl = 0.15
+riskPct = 0.00125

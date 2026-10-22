@@ -1,0 +1,50 @@
+name: starcoach
+
+services:
+  trader:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: starcoach-trader:local
+    init: true
+    # A finished run exits 0 and stays stopped. A crash restarts the daemon (same RUN_END resumes the saved state);
+    # five quick failures in a row, for example a RUN_END in the past, stop the loop.
+    restart: on-failure:5
+    stop_grace_period: 60s
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      STARCOACH_MODE: ${STARCOACH_MODE:-paper}
+      STARCOACH__risk__killFile: control/STOP
+      OTEL_PROMETHEUS_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:9464:9464"
+    volumes:
+      - ./config:/app/config:ro
+      - ./state:/app/state
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./control:/app/control
+
+  dashboard:
+    image: starcoach-trader:local
+    depends_on:
+      - trader
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      STARCOACH__risk__killFile: control/STOP
+    command: ["bun", "src/dashboard/server.ts", "--host", "0.0.0.0", "--port", "8787"]
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./config:/app/config:ro
+      - ./state:/app/state:ro
+      - ./logs:/app/logs:ro
+      - ./control:/app/control
+    healthcheck:
+      disable: true

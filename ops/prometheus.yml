@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The bot's own endpoint (OTEL_PROMETHEUS_PORT, default 9464). On Linux start the bot with
+  # OTEL_PROMETHEUS_HOST=0.0.0.0 so the container can reach it.
+  - job_name: starcoach
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9464"]

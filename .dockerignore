@@ -1,0 +1,16 @@
+.git
+node_modules
+logs
+state
+data
+control
+STOP
+.env
+.env.*
+!.env.example
+config/local.toml
+docs/img
+test
+*.md
+!config/README.md
+.fx

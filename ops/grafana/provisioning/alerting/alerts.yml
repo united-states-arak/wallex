@@ -1,0 +1,169 @@
+# Grafana-managed alert rules for the Starcoach bot (file provisioning, apiVersion 1).
+# Generated alongside starcoach.json. All percentages are fractions (0.06 = 6%).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: starcoach
+    folder: Starcoach
+    interval: 1m
+    rules:
+      - uid: sc-bot-down
+        title: "Bot down or heartbeat stale"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "max(starcoach_heartbeat_age_seconds) or vector(99999)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [120]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: Alerting
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "No fresh heartbeat for more than 120 s (or the metrics endpoint is gone). Stops are not being monitored."
+        labels:
+          severity: critical
+          app: starcoach
+        isPaused: false
+      - uid: sc-guard-halted
+        title: "Risk guard halted"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "max by (reason) (starcoach_guard_halted)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [0]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "The risk guard has halted trading ({{ $labels.reason }})."
+        labels:
+          severity: critical
+          app: starcoach
+        isPaused: false
+      - uid: sc-drawdown
+        title: "Drawdown from day peak above 6%"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "max(starcoach_drawdown_pct)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [0.06]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Equity is more than 6% below the day peak (the guard halts at 12%)."
+        labels:
+          severity: warning
+          app: starcoach
+        isPaused: false
+      - uid: sc-day-pnl
+        title: "Day PnL below -8%"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "min(starcoach_day_pnl_pct)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "lt", "params": [-0.08]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Day PnL is below -8%."
+        labels:
+          severity: critical
+          app: starcoach
+        isPaused: false
+      - uid: sc-equity-floor
+        title: "Equity below 70% of start"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "min(starcoach_equity_tmn / starcoach_start_equity_tmn)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "lt", "params": [0.7]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Equity is below 70% of the starting equity (the guard hard stop is at 70% by default)."
+        labels:
+          severity: critical
+          app: starcoach
+        isPaused: false
+      - uid: sc-api-errors
+        title: "API errors above 5 per minute"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 900, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "sum(rate(starcoach_api_errors_total[1m])) * 60", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [5]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "More than 5 exchange API errors per minute for 5 minutes."
+        labels:
+          severity: warning
+          app: starcoach
+        isPaused: false
+      - uid: sc-stuck-exit
+        title: "Exit or TP order rejected"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "sum by (kind) (increase(starcoach_exec_rejected_total{kind=~\"exit|tp\"}[5m]))", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [0]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "An {{ $labels.kind }} order was rejected by the exchange. A stuck exit leaves a position unprotected."
+        labels:
+          severity: critical
+          app: starcoach
+        isPaused: false
+      - uid: sc-ai-fallback
+        title: "AI fallback ratio above 50% (15m)"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 1200, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "sum(increase(starcoach_ai_verdicts_total{source=\"fallback\"}[15m])) / (sum(increase(starcoach_ai_verdicts_total[15m])) >= 3)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [0.5]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "More than half of the AI supervisor verdicts in the last 15 minutes were fallbacks."
+        labels:
+          severity: warning
+          app: starcoach
+        isPaused: false
+      - uid: sc-bar-stale
+        title: "Symbol bar age above 300 s"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "max by (symbol) (starcoach_last_bar_age_seconds)", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [300]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "No new 1m bar for {{ $labels.symbol }} in over 5 minutes."
+        labels:
+          severity: warning
+          app: starcoach
+        isPaused: false
+      - uid: sc-run-ending
+        title: "Run ends in under 20 min with positions open"
+        condition: C
+        data:
+          - {"refId": "A", "relativeTimeRange": {"from": 600, "to": 0}, "datasourceUid": "prometheus", "model": {"refId": "A", "expr": "clamp_min(starcoach_run_seconds_remaining, 1) < 1200 and on() starcoach_open_positions > 0", "instant": true, "intervalMs": 1000, "maxDataPoints": 43200, "datasource": {"type": "prometheus", "uid": "prometheus"}}}
+          - {"refId": "B", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "B", "type": "reduce", "expression": "A", "reducer": "last", "settings": {"mode": "dropNN"}, "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+          - {"refId": "C", "datasourceUid": "__expr__", "relativeTimeRange": {"from": 0, "to": 0}, "model": {"refId": "C", "type": "threshold", "expression": "B", "conditions": [{"evaluator": {"type": "gt", "params": [0]}}], "datasource": {"type": "__expr__", "uid": "__expr__"}}}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "RUN_END is under 20 minutes away and positions are still open. Check the flatten phase or run pullout."
+        labels:
+          severity: critical
+          app: starcoach
+        isPaused: false

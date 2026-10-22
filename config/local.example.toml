@@ -1,0 +1,30 @@
+# Copy to config/local.toml (gitignored) and uncomment what you want to change.
+# Only list the options you change; everything else keeps the value from default.toml / the profile.
+# Do NOT put API keys here: WALLEX_API_KEY and AI_API_KEY belong in the environment or .env.
+# Check the result with: bun run config show
+
+# [risk]
+# riskPct = 0.005
+# maxPositions = 1
+# dayLossHalt = 0.08
+
+# [market]
+# symbols = ["PEPETMN", "DOGETMN"]
+
+# [market.universe]
+# exclude = ["PUMPTMN"]
+
+# [strategy.ict]
+# minNetRr = 1.8
+
+# [detect]
+# models = ["sweep"]
+# minScore = 5
+
+# [ai]
+# baseUrl = "https://api.openai.com/v1"   # key still comes from AI_API_KEY
+# model = "gpt-4o-mini"
+# failMode = "veto"
+
+# [paper]
+# startTmn = 10_000_000

@@ -1,0 +1,2 @@
+# balanced: the built-in defaults, unchanged. Select with STARCOACH_PROFILE=balanced.
+# Anything listed here would override config/default.toml; nothing needs to.
