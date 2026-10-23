@@ -8,6 +8,15 @@ services:
         GIT_SHA: ${GIT_SHA:-dev}
     image: starcoach-trader:local
     init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
     # A finished run exits 0 and stays stopped. A crash restarts the daemon (same RUN_END resumes the saved state);
     # five quick failures in a row, for example a RUN_END in the past, stop the loop.
     restart: on-failure:5
@@ -33,11 +42,22 @@ services:
     depends_on:
       - trader
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
     env_file:
       - path: .env
         required: false
     environment:
       STARCOACH__risk__killFile: control/STOP
+      # Needed for the kill-switch button because the dashboard listens on 0.0.0.0 inside the container (16+ characters)
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:-}
     command: ["bun", "src/dashboard/server.ts", "--host", "0.0.0.0", "--port", "8787"]
     ports:
       - "127.0.0.1:8787:8787"

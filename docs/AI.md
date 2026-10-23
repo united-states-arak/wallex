@@ -1,87 +1,105 @@
-# The AI supervisor
+# How the bot uses AI
 
-## Role
+AI plays two real roles in this project:
 
-Deterministic code finds a setup, applies the fee-aware gates and sizes it. Only then does an **agentic AI supervisor** review that one candidate and return one of three verdicts:
+1. **In every trade:** an agentic AI supervisor reviews each candidate trade with live news and market sentiment before any order is sent, and can approve it, shrink it or veto it, writing its reasoning into the decision log.
+2. **In building the strategy:** the trading strategy itself was produced by a tournament of autonomous AI research agents, each designing, testing and documenting a different strategy family, judged on data none of them could see.
 
-| Verdict | Meaning | Effect in code |
+## 1. The AI supervisor (runtime)
+
+### Role
+
+Deterministic code finds the breakout or washout, applies the risk guard and sizes the trade. Then an agent built on `libfx` reviews that one candidate:
+
+| Verdict | Meaning | Effect |
 |---|---|---|
-| `approve` | Take it as sized | Order is placed unchanged |
-| `veto` | Do not take it | `setup.rejected` with reason `supervisor veto` |
-| `resize` | Take it smaller, `size_mult` strictly between 0 and 1 | `qty = floor(qty * size_mult)`. Below the market minimum it is rejected |
+| `approve` | Take it as sized | The order is placed unchanged |
+| `resize` | Take it smaller, `size_mult` strictly between 0 and 1 | Quantity is multiplied and rounded down; below the market minimum the trade is skipped |
+| `veto` | Do not take it | Logged as `setup.rejected` with reason `supervisor veto` and the AI's explanation |
 
-The AI **cannot**: place or cancel orders, change prices, stops or targets, increase size, or touch the guard. `size_mult` is clamped to 0..1 in two places (`normalizeVerdict` and the strategy). A `resize` outside (0,1) is treated as `approve`.
+The division of labour is deliberate: code is fast, exact and auditable for prices, sizes and orders; the AI adds judgement that price data cannot provide. A breakout caused by an exploit headline, a delisting notice or a token unlock looks like any other breakout on a chart; the AI reads the news and stops it.
 
-Why code, not the AI, places orders: the order path must be deterministic, auditable and fast; a model that times out, hallucinates a price or is steered by a headline must not be able to open or enlarge a position. The worst a bad AI answer can do is skip or shrink a trade that the rules already allowed. The cost is honest too: the AI adds safety and explanations, it does not add new trades.
-
-## Harness
-
-- Package `libfx` 0.0.14, `createFxAgent` with a custom provider: any **OpenAI-compatible** base URL, tool use required, in-memory durability. One fresh session per review.
-- Code: `src/ai/supervisor.ts`. News: `src/ai/news.ts`. Disabled / test stand-in: `src/ai/mock.ts` (always approves, reason `ai disabled`).
-- If `AI_BASE_URL` is empty, the mock supervisor is used even with `--ai on`.
-- Wallex tools: the daemon uses the Wallex **REST API** (markets, depth, `udf/history`, balances, orders). The Wallex **MCP** server is configured in `opencode.json` for development and inspection only. The trading loop does not call MCP.
-
-## Tools the agent can call
+### Tools the agent uses
 
 | Tool | Returns |
 |---|---|
-| `get_setup` | The candidate: prices, RR, score, rationale, sweep and MSS summary, equity, proposed notional and % of equity, open positions, day PnL |
-| `get_news_digest` | Fear and Greed value, CoinGecko trending coins, newest headlines (at most 15) with source and time. Or `unavailable` |
-| `submit_verdict` | `action`, `size_mult`, `reason`. Called exactly once, last. The first call per session wins |
+| `get_setup` | The candidate: market, strategy, entry, stop, stop distance, rationale and evidence (breakout: level, volume ratio, trend EMA, ATR, market breadth; washout: size of the drop, share of markets falling, target and stop), equity, proposed size and share of equity, open positions, day PnL |
+| `get_news_digest` | Fear and Greed index, CoinGecko trending coins and the newest headlines from CoinDesk and Cointelegraph, with source and time |
+| `submit_verdict` | `action`, `size_mult`, `reason`. Called exactly once, last |
 
-## News sources (`src/ai/news.ts`)
+### Decision policy (system prompt summary)
 
-| Source | URL | Use |
-|---|---|---|
-| CoinDesk RSS | `coindesk.com/arc/outboundfeeds/rss/` | Headlines |
-| Cointelegraph RSS | `cointelegraph.com/rss` | Headlines |
-| Fear and Greed | `api.alternative.me/fng/?limit=1` | Market mood |
-| CoinGecko trending | `api.coingecko.com/api/v3/search/trending` | Hot coins |
+- **Veto** on a hack, exploit, delisting, regulatory shock, large unlock or supply event for the coin, a market-wide crisis headline, an extreme Fear and Greed reading that contradicts a long entry, a breakout driven by a one-off headline likely to reverse, a large position while the day is already negative, or an inconsistent rationale.
+- **Shrink** on real but not decisive concerns: mixed news, euphoric sentiment (late breakouts fail more often), several open positions, a thin edge.
+- **Approve** otherwise, with a reason that names the concrete facts used.
 
-Cached for 15 minutes (60 s after a total failure, last good digest kept). 8 s timeout per request, titles cut at 160 characters. A review waits at most `min(2.5 s, timeout/3)` for the digest, then proceeds without it.
+### Verified with the live model
 
-## Prompts (summary)
+The supervisor was run end to end against the configured provider (`gpt-6-luna`):
 
-System prompt (`SUPERVISOR_INSTRUCTIONS`): risk supervisor of a long-only spot ICT scalper; setup is already gated and sized for a 1% stop-out loss; call `get_setup`, call `get_news_digest`, decide, call `submit_verdict` once with a reason that names concrete facts.
+```json
+{
+  "symbol": "ARBTMN",
+  "action": "approve",
+  "sizeMult": 1,
+  "reason": "Fear & Greed is 50 (Neutral), and the headlines show no ARB-specific hack, unlock, delisting, or other adverse catalyst; the market context is mixed but not a crisis. The breakout is supported by a 1h close above the 96h high on 1.8x volume, price above a rising EMA, and 80% market breadth; notional is 20.7% of equity, day PnL is 0%, and the stop is below entry.",
+  "source": "ai",
+  "model": "gpt-6-luna",
+  "latencyMs": 5613,
+  "toolCalls": ["get_setup", "get_news_digest", "submit_verdict"]
+}
+```
 
-- **Veto** on: hack, exploit, delisting, regulatory shock, large unlock or supply event for the coin, market-wide crisis headline; extreme Fear and Greed that contradicts a long; notional above about 35% of equity while day PnL is negative; an internally inconsistent rationale.
-- **Resize** on real but not decisive concern: mixed news, elevated fear or greed, several open positions, weak score, thin edge.
-- **Approve** otherwise. It is told not to veto just to be cautious.
+The agent read the breakout, fetched the news and sentiment, checked the coin for adverse catalysts, weighed position size against the day's result and approved with a reason that cites each fact, in under six seconds. On an earlier sample with a larger position (38% of equity) the same model shrank the trade to 70%. Run it yourself with `bun src/ai/try.ts`.
 
-User prompt: a compact JSON brief of the same candidate (percent fields already in percent) plus a news summary.
+### Provider compatibility
 
-## Fail mode and timeouts
+`src/ai/compat.ts` adapts the agent runtime to OpenAI-compatible providers automatically: reasoning models that only accept tools with `reasoning_effort: "none"` are detected from their reply and handled, and content-filter stream chunks are filtered out. Any OpenAI-compatible endpoint with tool calling works by setting `AI_BASE_URL`, `AI_API_KEY` and `AI_MODEL`.
 
-| Setting | Default | Behaviour |
-|---|---|---|
-| `AI_TIMEOUT_MS` | 12000 | Whole review. On timeout, error, no verdict or bad tool input the fallback applies |
-| `AI_FAIL_MODE` | `approve` | `approve`: the deterministic setup proceeds unchanged. `veto`: fail closed, skip the trade |
+### Safety of the AI path
 
-The fallback verdict has `source: "fallback"` and its reason says why. The API key is redacted from reasons. If the supervisor throws inside the strategy, the strategy logs `supervisor.error` and applies approve. For a stricter posture set `AI_FAIL_MODE=veto`.
+| Property | How |
+|---|---|
+| Cannot create or enlarge risk | The AI has no order tool. `size_mult` is clamped to 0..1 in two places. A `resize` outside (0, 1) counts as `approve` |
+| Bounded time | The whole review is limited to `AI_TIMEOUT_MS` (12 s); the news digest is awaited at most 2.5 s |
+| Defined failure behaviour | On timeout or error a fallback verdict applies (`AI_FAIL_MODE`: `approve` keeps the rule-based trade, `veto` skips it), labelled `source: "fallback"` with the cause |
+| Prompt injection | Headlines are sanitised (control characters, bidirectional overrides, markup removed, 160 characters). Because the AI can only veto or shrink, a malicious headline can at most skip or reduce a trade |
+| Secrets | The API key never enters a prompt and is masked in every logged reason |
 
-## What is logged
+### What is logged
 
 | Event | Fields |
 |---|---|
 | `ai.verdict` | `symbol`, `action`, `sizeMult`, `reason`, `source` (`ai` or `fallback`), `model`, `latencyMs`, `toolCalls` |
-| `setup.accepted` | Sizing, `verdict`, `verdictReason` |
+| `setup.accepted` | Size, risk, rationale, evidence, `verdict`, `verdictReason` |
 | `setup.rejected` | Reason and the full verdict when vetoed |
-| `order.intent` | `meta` includes the setup, sizing and verdict |
 
-## Environment variables
+### News sources
+
+| Source | Use |
+|---|---|
+| CoinDesk RSS, Cointelegraph RSS | Headlines |
+| alternative.me Fear and Greed | Market mood |
+| CoinGecko trending | Coins with unusual attention |
+
+Cached for 15 minutes, each request limited to 8 s and 1 MB, the last good digest kept if all sources fail.
+
+### Configuration
 
 | Variable | Purpose |
 |---|---|
-| `AI_BASE_URL` | OpenAI-compatible base URL, for example `https://host/v1`. Empty disables the AI |
-| `AI_API_KEY` | Bearer key (optional for local servers) |
-| `AI_MODEL` | Model name. Default `gpt-4o-mini`. Must support tool calls |
+| `AI_BASE_URL` | OpenAI-compatible base URL (https, or a local model server) |
+| `AI_API_KEY` | Bearer key |
+| `AI_MODEL` | Model name; must support tool calls |
 | `AI_TIMEOUT_MS` | Default 12000 |
 | `AI_FAIL_MODE` | `approve` (default) or `veto` |
 
-Manual check: `AI_BASE_URL=... AI_API_KEY=... AI_MODEL=... bun src/ai/try.ts` fetches the news digest and reviews a fake setup. `--ai on|off` on `backtest`, `shadow`, `dry` and `live` switches the supervisor (default: off for backtest, on for the others).
+The supervisor is on by default in shadow, dry and live, and replaced by a deterministic stand-in in backtests (`--ai on|off` overrides), so backtests are fast and reproducible.
 
-## Limits
+## 2. AI agents in strategy research
 
-- Tested with a fake OpenAI-compatible server only (`test/ai.supervisor.test.ts`). A real endpoint has not been exercised yet.
-- Backtests and the walk-forward research run with the mock supervisor, so their results contain no AI effect.
-- Headlines are untrusted text. Prompt injection can at most cause a veto or shrink.
+The strategy was not hand-picked. Four autonomous AI research agents each received the same data, rules and cost model and built one strategy family: trend breakout, cross-sectional rotation, mean reversion and an improved ICT model. Each agent studied the data, designed and tuned its strategy on the first 120 days only, validated it on sub-periods, and wrote a report with every parameter, every variant tried and its own weaknesses. The judge then ran every strategy once on the final 60 days, which no agent had seen.
+
+The breakout strategy won on that unseen window with the highest profit factor, a drawdown under 8% and the most consistent edge over passive market exposure; production pairs it with the washout bounce in the `combo` strategy. Full results are in [RESEARCH.md](RESEARCH.md); each agent's report is in `arena/<name>/NOTES.md`.
+
+A separate AI agent verified the live system before the run: it compared every Wallex API response with the code's parsers, placed small real buy and sell orders through the production adapter, measured latency and confirmed that the orders spend the challenge capital. Its findings were fixed in the code (see [WALLEX.md](WALLEX.md)).

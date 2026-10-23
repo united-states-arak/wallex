@@ -10,7 +10,11 @@ Everything tunable lives in this folder. Formats are TOML, so every file can car
 | `blocked-markets.txt` | Symbols that may never be traded. |
 
 Profiles: `balanced` (the defaults), `conservative` (0.5% risk, one position, tighter halts),
-`aggressive` (net RR 1.3, minScore 3, 10 entries/hour, 15% day halt), `backtest` (no kill file, telemetry off).
+`aggressive` (15% day halt, plus looser ICT gates: net RR 1.3, minScore 3; these only matter with `--strategy ict`),
+`backtest` (no kill file, telemetry off).
+
+The default strategy is `strategy.active = "combo"` (breakout + washout). Its parameters are `[strategy.breakout]`
+and `[strategy.washout]`; `[strategy.ict]` and `[detect]` belong to the alternative ICT model.
 
 ## Layering (lowest to highest precedence)
 
@@ -34,14 +38,14 @@ Profiles: `balanced` (the defaults), `conservative` (0.5% risk, one position, ti
 
 ## Secrets
 
-`WALLEX_API_KEY` and `AI_API_KEY` are read from the environment only (use `.env`). A TOML file containing a key
+`WALLEX_API_KEY`, `AI_API_KEY` and `DASHBOARD_TOKEN` are read from the environment only (use `.env`). A TOML file containing a key
 named `apiKey`, `api_key`, `secret`, `token` or `password` is rejected with an error. `config show` and every
 printed config redact them, and the config hash excludes them.
 
 ## Validation
 
 Unknown keys are errors with a "did you mean" hint. Ranges and cross-field rules (for example
-`riskPct` in (0, 0.05], `minStopPct < maxStopPct`, `flattenMin` shorter than the run) are checked on load and
+`riskPct` in (0, 0.05], `minStopPct < maxStopPct`, `entryCutoffMin` shorter than the run) are checked on load and
 all problems are listed together with their dotted path.
 
 ## Commands

@@ -272,12 +272,12 @@ Columns: exec rej counts rejected exit or take-profit orders; anything above 0 m
 This is a short sample (${days} days, one market regime) on a handful of symbols, so every number here has wide error bars; with only a few trades per window, a single trade can flip the sign. Picking the best of ${grid.length} variants on train and seeing it do well on test is weak evidence, and the table is shown in full so that selection noise and train/test gaps are visible. \`--symbols auto\` ranks symbols using today's 24h stats, which look ahead relative to the historical window and favour coins that have recently been active. Fills are simulated from 1m candles, so queue position, partial fills and real spread are not modelled beyond the paper exchange rules. Positions still open when a window ends are liquidated by the harness: they move return but are not counted as trades. The test window gets 12h of earlier bars as detector context (no orders placed), and the grid parameters were chosen by hand before this run. None of this is a forecast of live performance.
 `
   if (!existsSync('docs')) mkdirSync('docs', { recursive: true })
-  writeFileSync('docs/RESEARCH.md', doc)
+  writeFileSync('docs/ICT_WALKFORWARD.md', doc)
 
   console.log(`\n${table}\n`)
   console.log(`picked on train: ${w.picked.name} (${w.picked.basis}); test: ${picked.test.trades} trades, ret ${f(picked.test.returnPct)}%, maxDD ${f(picked.test.maxDrawdownPct)}%`)
   console.log(`rejects (picked, test): ${JSON.stringify(picked.test.rejectedByReason)}`)
-  console.log(`done in ${secs}s. json: ${jsonPath}, doc: docs/RESEARCH.md`)
+  console.log(`done in ${secs}s. json: ${jsonPath}, doc: docs/ICT_WALKFORWARD.md`)
 }
 
 if (import.meta.main) {

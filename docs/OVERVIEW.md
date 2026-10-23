@@ -1,22 +1,26 @@
 # StarCoach Trader: overview (one page)
 
-A Bun daemon trades a simplified **ICT** strategy (liquidity sweep, structure shift, FVG retracement, plus trend continuation) on **Wallex spot, TMN pairs, long only**. Code makes and places every order. An **AI supervisor** (OpenAI-compatible model, `libfx` agent) can only **approve, veto or shrink** a candidate trade and writes the reason to the decision log. At the end of the run everything is sold back to **TMN**.
+An autonomous trading engine for **Wallex spot TMN markets**. It trades two researched models in one position book, a **trend breakout with a market-breadth gate** and a **washout bounce**, sizes every trade from its stop, lets an **agentic AI supervisor** approve, shrink or veto each trade using live news and sentiment, logs the reason for every decision, and converts the account back to **TMN** at the end with one command (`bun run pullout --yes`).
 
 ## 1. How it works
 
 ```mermaid
 flowchart LR
     subgraph Data
-        W["Wallex 1m candles and depth"] --> AGG
+        W["Wallex 1m candles and depth, 15 markets"] --> H["Closed 1h bars and indicators"]
+        W --> Q["Closed 15m bars"]
         N["News RSS, Fear and Greed, CoinGecko trending"] --> AI
-        AGG["Aggregate 5m, 15m, 1H"]
     end
-    AGG --> DET["ICT detectors: sweep, MSS, FVG, continuation"]
-    DET --> GATE{"Fee-aware gates: stop band 1 to 2.5 pct, gross RR 2, net RR 1.5, spread"}
-    GATE -- pass --> AI["AI supervisor: approve, veto or shrink, plus written reason"]
-    AI --> RISK{"Risk layer in code: 1 pct sizing, guard"}
-    RISK -- ok --> EX["Wallex REST: limit entry, limit TPs, monitored stop"]
-    EX --> LOG[("JSONL decision log with git SHA")]
+    H --> SIG{"Breakout: 4-day high, rising trend,<br/>1.5x volume, not extended"}
+    H --> GATE{"Market gate:<br/>70% of markets trending up"}
+    SIG --> GATE
+    Q --> WO{"Washout: fall of 3.5% in 60 min,<br/>no market-wide crash"}
+    GATE -- open --> RISK{"Risk guard and sizing:<br/>1% of equity at the stop,<br/>max 50% per position, max 2 positions"}
+    WO --> RISK
+    RISK --> AI["AI supervisor agent:<br/>approve, shrink or veto, with reason"]
+    AI --> EX["Wallex REST: marketable limit buy,<br/>independent order sanity check"]
+    EX --> MAN["Breakout: stop 4 ATR, trailing stop 8 ATR<br/>Washout: take-profit 4%, stop 6%, 8 h<br/>stops checked every minute and every 5 s"]
+    MAN --> LOG[("Decision log with git SHA")]
     AI --> LOG
     RISK -- reject --> LOG
 ```
@@ -26,63 +30,65 @@ flowchart LR
 ```mermaid
 stateDiagram-v2
     [*] --> Watching
-    Watching --> SweepSeen: price takes a low and closes back above it
-    SweepSeen --> Armed: displacement closes above the last swing high and leaves an FVG
-    Armed --> Pending: gates, AI and risk pass, limit buy at the FVG entry
-    Armed --> Watching: invalidated or expired
-    Pending --> InTrade: filled
-    Pending --> Watching: expired or cancelled
-    InTrade --> Closed: TP1 and TP2 limit sells filled
-    InTrade --> Closed: stop hit, sell by limit below the bid
-    InTrade --> Closed: time stop or end of run flatten
-    Closed --> Watching: next setup
+    Watching --> Candidate: breakout (hour closes above the 96h high on volume, gate open) or washout (sharp 1h drop)
+    Candidate --> Watching: guard blocks or AI vetoes (reason logged)
+    Candidate --> InTrade: sized from the stop, AI approves or shrinks, buy fills
+    InTrade --> InTrade: breakout trailing stop rises with the price
+    InTrade --> Closed: take-profit, trailing stop, stop or time stop
+    Closed --> Watching: next signal
 ```
 
 ## 3. Key numbers
 
 | Rule | Value |
 |---|---|
-| Market | Spot only, long only, TMN pairs not in `config/blocked-markets.txt` |
-| Risk per trade | 1% of equity lost if the stop is hit, fees and slippage included. Position size follows from the stop, capped at 50% of equity |
-| Stop | 1.0% to 2.5% below entry, never widened, watched by the daemon every 5 s |
-| Targets | TP1 (50%) at the next liquidity pool at least 2R away, TP2 (rest) at the next one. After TP1 the stop moves to entry plus 0.6% |
-| Cost gate | Net RR at least 1.5 after maker 0.25%, taker 0.3%, slippage 0.1% |
-| Open positions | At most 2 (pending entries count) |
-| Day halt | 12% below the day's peak. Hard kill at 30% below start |
-| Profit lock | Risk 0.5% after +15%, 0.25% after +30% |
-| Other guards | 3 losses in a row pause 30 min, 6 entries per hour, `STOP` file |
-| End of run | Entries off 45 min before `RUN_END`, flatten from 15 min before, all coins sold to TMN |
+| Markets | 15 liquid allowed TMN pairs, spot, long only |
+| Breakout signal | 1h close above the 96h high, above a rising 96h EMA, volume at least 1.5x, at most 3 ATR extended |
+| Washout signal | Fall of 3.5% or more in 60 minutes on closed 15m bars, while at most half the market is falling; take-profit 4%, stop 6%, time stop 8 h |
+| Market gate | At least 70% of the 15 markets above their 168h EMA |
+| Risk per trade | 1% of equity at the stop, fees and slippage included |
+| Position cap | 50% of equity per position, at most 2 positions |
+| Breakout exits | Initial stop 4 ATR, trailing stop 8 ATR, time stop 336 h |
+| Account limits | Day halt at 12% below the day's peak, hard halt at 30% below start, profit locks after +15% and +30%, `STOP` kill switch |
+| Order safety | Allowed markets only, exchange rounding and minimums, live sanity check (max 3,000,000 TMN per buy, at most 3% above the ask) |
+| AI | Reviews every candidate with news and sentiment; can approve, shrink or veto; cannot place or enlarge orders |
 
-## 4. Modes
+## 4. Results
+
+| Test | Return | Max drawdown | Notes |
+|---|---|---|---|
+| Production backtest, 180 days | +41.43% | 6.15% | 255 round trips, 58.8% wins, about 4 per 3 days |
+| Production backtest, last 60 days | +26.79% | 7.82% | 75 round trips |
+| Tournament harness, held-out 60 days (3x harsher spread) | +17.52% | 7.85% | Never seen during development |
+| Tournament harness, 120-day train window | +30.73% | 7.60% | |
+| Breakout model alone, held-out 60 days | +23.86% | 7.85% | Tournament winner |
+
+Details: [RESEARCH.md](RESEARCH.md).
+
+## 5. Modes
 
 | Command | Data | Orders |
 |---|---|---|
-| `bun run backtest --strategy ict --symbols auto --days 7` | Cached 1m history | Paper fills with fees |
-| `bun run shadow --strategy ict --minutes 1440` | Live | Paper fills, virtual 5M TMN |
-| `bun run dry --strategy ict` | Live | Validated and logged, never sent |
-| `bun run live --paper` / `--dry` / (no flag) | Live | Paper / dry / real orders |
-| `bun run pullout` and `bun run pullout --yes` | Live | Plan only / cancel all and sell everything to TMN |
-| `bun run check` | Live | None. Prints raw private API responses |
-
-`backtest`, `shadow`, `dry` and `live` default to the `ict` strategy. `--strategy noop` places no orders.
-
-## 5. Honest status
-
-- Built and unit tested: detectors, strategy, sizing, guard, AI supervisor (fake server), daemon, paper, dry, pullout, walk-forward, dashboard, metrics.
-- 7-day backtest on 12 markets: +1.14%, max drawdown 1.12%, two closed round trips. The walk-forward pick had 0 test trades. These are tiny samples, not evidence of an edge. The fee floor keeps trade count low.
-- **Not verified yet:** private Wallex response shapes and order parameters (run `bun run check` with the real key), the challenge credit account's balance endpoint, a real LLM endpoint, real fills, a 24 h live run.
+| `bun run backtest` | Cached history | Simulated with fees, spread and slippage |
+| `bun run shadow` | Live | Simulated, virtual 5M TMN |
+| `bun run dry` | Live | Validated and logged, never sent |
+| `bun run live --paper` / `--dry` / `--confirm-live` | Live | Paper / dry / real |
+| `bun run pullout` / `--yes` | Live | Plan only / sell everything to TMN |
+| `bun run dashboard` (`--demo`, `--replay`) | Logs | None |
 
 ## 6. Documentation
 
 | Doc | Content |
 |---|---|
-| [README](../README.md) | Quick start and feature list |
-| [ARCHITECTURE](ARCHITECTURE.md) | Components, sequence, modes, state files, failure handling |
-| [STRATEGY](STRATEGY.md) | The exact algorithm with a worked example |
-| [RISK](RISK.md) | Sizing, guard, flatten, pullout |
-| [AI](AI.md) | Supervisor, tools, news, fail mode |
-| [OPERATIONS](OPERATIONS.md) | Runbook, env vars, dashboard, metrics, emergencies |
-| [TESTING](TESTING.md) | Reproducing every test mode, simulator assumptions |
-| [COMPLIANCE](COMPLIANCE.md) | Challenge requirements and judging criteria mapping |
-| [RESEARCH](RESEARCH.md) | Generated walk-forward table |
+| [README](../README.md) | Quick start and highlights |
+| [STRATEGY](STRATEGY.md) | Exact buy and sell rules with a worked example |
+| [RESEARCH](RESEARCH.md) | Strategy tournament, held-out results, backtests |
+| [RISK](RISK.md) | Sizing, guard, order checks, stops, pullout |
+| [AI](AI.md) | AI supervisor and AI research agents |
+| [WALLEX](WALLEX.md) | Endpoints, verified response shapes, live verification, MCP |
+| [ARCHITECTURE](ARCHITECTURE.md) | Components, sequence, modes, failure handling |
+| [SECURITY](SECURITY.md) | Threat model, controls, standards alignment |
+| [OPERATIONS](OPERATIONS.md) | Runbook, configuration, dashboard, metrics, emergencies |
+| [TESTING](TESTING.md) | Tests, backtests, shadow, dry, live verification |
+| [COMPLIANCE](COMPLIANCE.md) | Challenge requirements and judging criteria, point by point |
 | [VIDEO_SCRIPT_FA](VIDEO_SCRIPT_FA.md) | Persian demo video script |

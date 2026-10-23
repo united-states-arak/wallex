@@ -3,6 +3,7 @@ import type { PaperExchange } from '../exchange/paper'
 import type { Log } from '../log'
 import type { Candle, Exchange, Strategy } from '../types'
 import type { WallexRest } from '../wallex/rest'
+import { loadCandles } from '../data/candles'
 import { stepStrategy } from './step'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -37,12 +38,19 @@ export async function runPoll(o: {
   const history: Record<string, Candle[]> = {}
   const lastT: Record<string, number> = {}
 
+  const primeDays = o.strategy.prime ? (o.strategy.primeDays ?? 0) : 0
   for (const symbol of o.symbols) {
-    const bars = (await o.rest.history(symbol, nowSec() - warmupSec, nowSec())).filter((c) => c.t + 60 <= nowSec())
+    let bars: Candle[]
+    if (primeDays > 0) {
+      // Long warm-up, one UTC day per request (Wallex refuses longer 1m ranges); complete days come from the local cache.
+      const all = (await loadCandles(o.rest, symbol, nowSec() - Math.round(primeDays * 86_400), nowSec())).filter((c) => c.t + 60 <= nowSec())
+      o.strategy.prime!(symbol, all)
+      bars = all.slice(-maxHistory)
+    } else bars = (await o.rest.history(symbol, nowSec() - warmupSec, nowSec())).filter((c) => c.t + 60 <= nowSec())
     history[symbol] = bars
     lastT[symbol] = bars[bars.length - 1]?.t ?? 0
     for (const c of bars) o.paper?.onCandle(symbol, c)
-    o.log('poll.warmup', { symbol, bars: bars.length })
+    o.log('poll.warmup', { symbol, bars: bars.length, primeDays })
   }
 
   const end = Date.now() + o.durationMs
@@ -50,7 +58,10 @@ export async function runPoll(o: {
     for (const symbol of o.symbols) {
       if (o.shouldStop?.()) break
       try {
-        const fresh = (await o.rest.history(symbol, lastT[symbol]! - 60, nowSec())).filter(
+        // A market with no warm-up bars has lastT 0, and a long outage leaves it far behind; Wallex answers no_data to ranges over
+        // about 1.5 days, which would stall the market for good, so never ask for more than the warm-up window.
+        const from = Math.max(lastT[symbol]! - 60, nowSec() - Math.max(warmupSec, 3600))
+        const fresh = (await o.rest.history(symbol, from, nowSec())).filter(
           (c) => c.t > lastT[symbol]! && c.t + 60 <= nowSec(),
         )
         for (const c of fresh) {

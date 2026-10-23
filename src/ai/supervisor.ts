@@ -2,15 +2,17 @@ import { readFileSync } from 'node:fs'
 import { createFxAgent, memory } from 'libfx'
 import { getSettings, loadSettings } from '../settings'
 import { nullLog, type Log } from '../log'
+import { createCompatFetch } from './compat'
 import { createMockSupervisor } from './mock'
 import { createNewsSource, type NewsSource } from './news'
 import type { NewsDigest, ReviewInput, Supervisor, Verdict } from './types'
 
-export const SUPERVISOR_INSTRUCTIONS = `You are the risk supervisor of an automated long-only spot trading bot that scalps ICT setups (liquidity sweep, market structure shift, fair value gap retracement) on Wallex TMN pairs.
-Deterministic code has already found the setup, checked its fee-aware risk/reward and sized it so that a stop-out costs about 1% of equity. You review ONE candidate setup and decide whether it should be taken. You can only approve it, veto it, or shrink it. You can never propose a bigger size, change prices, or place orders.
+export const SUPERVISOR_INSTRUCTIONS = `You are the AI risk supervisor of an automated long-only spot trading bot on Wallex TMN pairs.
+It runs two models in one position book. The washout model buys a market that fell 3.5% or more within an hour while the rest of the market is calm, with a take-profit 4% above, a stop 6% below and an 8-hour time stop. The breakout model: a closed 1-hour candle breaks the 4-day high on above-average volume, the coin is above its rising trend average, and most of the market is trending up. It exits with an initial stop 4 ATR below entry and a trailing stop 8 ATR below the highest price, so it has no fixed target and lets winners run. The bot also has an ICT model (liquidity sweep, structure shift, fair value gap) whose setups you may see.
+Deterministic code has already found the setup and sized it so that a stop-out costs about 1% of equity. You review ONE candidate setup and decide whether it should be taken. You can only approve it, veto it, or shrink it. You can never propose a bigger size, change prices, or place orders.
 
 How to work:
-1. Call get_setup to read the candidate (prices, risk/reward, score, rationale, sweep and structure shift summary, equity, proposed size, open positions, day PnL).
+1. Call get_setup to read the candidate (strategy, prices, stop distance, rationale and evidence, equity, proposed size, open positions, day PnL).
 2. Call get_news_digest to read Fear & Greed, trending coins and the newest crypto headlines. Check whether any headline concerns this coin or the wider market. The symbol is a TMN pair such as PEPETMN, so the coin is the part before TMN.
 3. Weigh the news, the market context and the setup together, then decide.
 
@@ -19,6 +21,7 @@ Veto when any of these holds:
 - Fear & Greed is at an extreme that contradicts a long entry (for example extreme fear with a falling market, where a long is catching a knife), and the setup has no unusually strong evidence to offset it.
 - The proposed notional is a large share of equity (above about 35%) while the day PnL is already negative.
 - The setup rationale is internally inconsistent: for example the numbers do not match the story, the stop is not below the entry, the target is not above the entry, or the stated risk/reward does not hold.
+For a washout, veto when the drop is explained by real bad news for that coin (hack, delisting, exploit, regulatory action), because then it is not an overshoot. For a breakout, also veto when the breakout is driven by a one-off headline that is likely to reverse (a denied listing rumour, an exploit, a pump announcement) or when the coin has an imminent unlock or delisting, and shrink it when the market mood is euphoric (extreme greed) because breakouts late in a euphoric run fail more often.
 Use resize (size_mult strictly between 0 and 1, for example 0.5) when there is real but not decisive concern: mixed news, elevated fear or greed, several open positions already, a weak score, or a thin edge. Otherwise approve. Do not veto just to be cautious; a clean setup with no adverse facts should be approved with size_mult 1.
 
 Finish by calling submit_verdict exactly once, with action approve, veto or resize, size_mult (1 for approve, 0 for veto, between 0 and 1 for resize) and a one or two sentence reason that names the concrete facts you used (the Fear & Greed value, a specific headline, the notional share of equity, the day PnL, the score). Your reason is written to the trade decision log that judges read. Do not call submit_verdict more than once and do not trade or output anything after it.`
@@ -75,16 +78,17 @@ export function buildPrompt(input: ReviewInput, news: NewsDigest | null): string
   const risk = s.entry - s.stop
   const brief = {
     symbol: s.symbol,
+    strategy: s.model,
     entry: s.entry,
     stop: s.stop,
-    tp1: s.tp1,
     stopDistancePct: round((risk / s.entry) * 100),
-    rr: round(risk > 0 ? (s.tp1 - s.entry) / risk : NaN),
-    score: s.score,
+    ...(s.tp1 !== undefined ? { tp1: s.tp1, rr: round(risk > 0 ? (s.tp1 - s.entry) / risk : NaN) } : { exit: 'trailing stop, no fixed target' }),
+    ...(s.score !== undefined ? { score: s.score } : {}),
     rationale: s.rationale,
-    sweep: { kind: s.sweep.kind, level: s.sweep.level, extreme: s.sweep.extreme },
-    mss: { level: s.mss.level, displacementAtr: round(s.mss.displacementAtr) },
-    fvg: { low: s.fvg.low, high: s.fvg.high },
+    ...(s.features ? { evidence: s.features } : {}),
+    ...(s.sweep ? { sweep: { kind: s.sweep.kind, level: s.sweep.level, extreme: s.sweep.extreme } } : {}),
+    ...(s.mss ? { mss: { level: s.mss.level, displacementAtr: round(s.mss.displacementAtr) } } : {}),
+    ...(s.fvg ? { fvg: { low: s.fvg.low, high: s.fvg.high } } : {}),
     equityTmn: Math.round(input.equityTmn),
     proposedNotionalTmn: Math.round(input.proposedNotionalTmn),
     proposedPctOfEquity: round(input.equityTmn > 0 ? (input.proposedNotionalTmn / input.equityTmn) * 100 : NaN, 1),
@@ -115,6 +119,7 @@ export function createSupervisor(opts: { log?: Log; env?: Record<string, string 
     ...(apiKey ? { credentials: async () => ({ apiKey }) } : {}),
     instructions,
     durability: memory(),
+    fetch: createCompatFetch(),
     tools: [
       {
         name: 'get_news_digest',

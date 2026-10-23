@@ -5,7 +5,7 @@ import { LiveExchange } from './exchange/live'
 import { PaperExchange } from './exchange/paper'
 import { loadBlocked } from './exchange/validate'
 import { gitSha, nullLog, type Log } from './log'
-import { planPullout, pullout, routeFor } from './pullout'
+import { planPullout, routeFor } from './pullout'
 import { runPoll } from './runner/poll'
 import { createGuard, defaultLimits, writeJsonAtomic, type Guard, type GuardLimits } from './risk/guard'
 import { getSettings, loadSettings, settingsHash } from './settings'
@@ -33,14 +33,11 @@ export interface DaemonOpts {
   // Unix ms. Defaults to run.end (RUN_END), then now + run.defaultHours.
   runEnd?: number
   entryCutoffMin?: number
-  flattenMin?: number
   startEquity?: number
   stateDir?: string
   limits?: Partial<GuardLimits>
   tickMs?: number
   pollMs?: number
-  verifyMs?: number
-  pulloutWaitMs?: number
   degradedAfterMs?: number
   // Reuse state files of an earlier process with the same RUN_END (default true).
   resume?: boolean
@@ -60,11 +57,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const nowSec = () => Math.floor(Date.now() / 1000)
 
 export function resolveSchedule(
-  over: { runEnd?: number; entryCutoffMin?: number; flattenMin?: number } = {},
+  over: { runEnd?: number; entryCutoffMin?: number } = {},
   env: Record<string, string | undefined> = process.env,
   nowMs = Date.now(),
 ) {
-  // run.* comes from the settings (config files, RUN_END / ENTRY_CUTOFF_MIN / FLATTEN_MIN, STARCOACH__run__*).
+  // run.* comes from the settings (config files, RUN_END / ENTRY_CUTOFF_MIN, STARCOACH__run__*).
   const run = (env === process.env ? getSettings() : loadSettings({ env })).run
   let runEnd = over.runEnd
   let defaulted = false
@@ -81,7 +78,6 @@ export function resolveSchedule(
     runEnd,
     defaulted,
     entryCutoffMin: over.entryCutoffMin ?? run.entryCutoffMin,
-    flattenMin: over.flattenMin ?? run.flattenMin,
   }
 }
 
@@ -115,8 +111,8 @@ export async function computeEquity(ex: Exchange, meta: Markets) {
   return { equity, holdings }
 }
 
-// Strategies place orders through the Exchange they are given, so entries are counted (and, after the cutoff, refused) here.
-export function guardedExchange(ex: Exchange, o: { guard: Pick<Guard, 'recordEntry'>; now: () => number; entriesOn?: () => boolean; onRefuse?: (r: OrderReq) => void }): Exchange {
+// Strategies place orders through the Exchange they are given, so entries are refused here after the cutoff.
+export function guardedExchange(ex: Exchange, o: { entriesOn?: () => boolean; onRefuse?: (r: OrderReq) => void }): Exchange {
   return {
     get mode() {
       return ex.mode
@@ -131,14 +127,12 @@ export function guardedExchange(ex: Exchange, o: { guard: Pick<Guard, 'recordEnt
         o.onRefuse?.(req)
         return { clientId: req.clientId, status: 'REJECTED', error: 'entries disabled' }
       }
-      const ack = await ex.place(req)
-      if (entry && ack.status !== 'REJECTED') o.guard.recordEntry(o.now())
-      return ack
+      return ex.place(req)
     },
   }
 }
 
-// For backtest, shadow and dry: keeps the guard informed of equity and entries without a daemon.
+// For backtest, shadow and dry: keeps the guard informed of equity without a daemon.
 export function withGuardFeed(strategy: StatefulStrategy, guard: Guard, meta: Markets): StatefulStrategy {
   let now = 0
   const feed = async (ex: Exchange) => {
@@ -149,13 +143,12 @@ export function withGuardFeed(strategy: StatefulStrategy, guard: Guard, meta: Ma
       // equity unknown this bar, the guard keeps its last value
     }
   }
-  const counted = (ex: Exchange) => guardedExchange(ex, { guard, now: () => now })
   const wrapped: StatefulStrategy = {
     name: strategy.name,
     async onBar(ctx: BarCtx) {
       now = (ctx.bars[ctx.bars.length - 1]?.t ?? 0) + 60
       await feed(ctx.ex)
-      return strategy.onBar({ ...ctx, ex: counted(ctx.ex) })
+      return strategy.onBar(ctx)
     },
     getState: () => strategy.getState?.(),
     restoreState: (s) => strategy.restoreState?.(s),
@@ -164,10 +157,14 @@ export function withGuardFeed(strategy: StatefulStrategy, guard: Guard, meta: Ma
   if (strategy.onTick) {
     wrapped.onTick = (ctx: TickCtx) => {
       now = ctx.now
-      return strategy.onTick!({ ...ctx, ex: counted(ctx.ex) })
+      return strategy.onTick!(ctx)
     }
   }
   if (strategy.setEntriesEnabled) wrapped.setEntriesEnabled = (e) => strategy.setEntriesEnabled!(e)
+  if (strategy.prime) {
+    wrapped.primeDays = strategy.primeDays
+    wrapped.prime = (s, b) => strategy.prime!(s, b)
+  }
   return wrapped
 }
 
@@ -210,13 +207,11 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
   const S = getSettings()
   const tickMs = opts.tickMs ?? S.wallex.tickMs
   const basePollMs = opts.pollMs ?? S.wallex.pollMs
-  const verifyMs = opts.verifyMs ?? 60_000
   const degradedAfterMs = opts.degradedAfterMs ?? 5 * 60_000
   const stateDir = opts.stateDir ?? S.logging.stateDir
-  const sched = resolveSchedule({ runEnd: opts.runEnd, entryCutoffMin: opts.entryCutoffMin, flattenMin: opts.flattenMin })
+  const sched = resolveSchedule({ runEnd: opts.runEnd, entryCutoffMin: opts.entryCutoffMin })
   const { runEnd } = sched
   const cutoffAt = runEnd - sched.entryCutoffMin * 60_000
-  const flattenAt = runEnd - sched.flattenMin * 60_000
   if (runEnd <= Date.now()) throw new Error(`RUN_END ${new Date(runEnd).toISOString()} is already in the past`)
   if (mode === 'live' && sched.defaulted) log('daemon.warn', { warn: 'RUN_END not set, defaulting to now + 24h' })
 
@@ -281,15 +276,19 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
       } catch (e) {
         log('daemon.restore_failed', { error: String(e) })
       }
+      // A position the strategy could not take back (another strategy's file, a broken entry) has no stop any more.
+      const before = stateExposure(saved.state)
+      const after = stateExposure(strategy.getState?.())
+      if (before.join(';') !== after.join(';')) {
+        log('daemon.restore_incomplete', { saved: before, restored: after })
+        console.error(`!!! WARNING: ${strategyPath} held ${before.join('; ') || 'nothing'} but the strategy restored ${after.join('; ') || 'nothing'}. Check those holdings by hand.`)
+      }
     }
   }
 
   let stopping: string | null = null
   let entriesOn = true
-  let flattening = false
   let warm = false
-  let flatDone = false
-  let lastFlatten = 0
   let lastHoldings: string[] = []
   let strategyErrors = 0
   let lastDegradedLog = 0
@@ -315,7 +314,7 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
   }
 
   const openPositions = () => strategy.openPositions?.() ?? []
-  const phase = () => (flattening ? 'flattening' : entriesOn ? 'trading' : 'entries_off')
+  const phase = () => (entriesOn ? 'trading' : 'entries_off')
 
   const applyPhase = (t: number) => {
     if (entriesOn && (t >= cutoffAt || stopping)) {
@@ -327,23 +326,16 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
       }
       log('daemon.entries_disabled', { reason: stopping ? 'shutdown' : 'entry cutoff', cutoffAt: new Date(cutoffAt).toISOString() })
     }
-    if (!flattening && t >= flattenAt && !stopping) {
-      flattening = true
-      log('daemon.flatten_phase', { flattenAt: new Date(flattenAt).toISOString() })
-    }
   }
 
   const guardedEx = guardedExchange(exchange, {
-    guard,
-    now: nowSec,
-    entriesOn: () => entriesOn && !flattening && Date.now() < cutoffAt,
+    entriesOn: () => entriesOn && Date.now() < cutoffAt,
     onRefuse: (r) => log('daemon.entry_dropped', { clientId: r.clientId, symbol: r.symbol, phase: phase() }),
   })
 
   const wrapped: StatefulStrategy = {
     name: strategy.name,
     async onBar(ctx: BarCtx) {
-      if (flattening) return []
       try {
         return await strategy.onBar(ctx)
       } catch (e) {
@@ -353,9 +345,12 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
       }
     },
   }
+  if (strategy.prime) {
+    wrapped.primeDays = strategy.primeDays
+    wrapped.prime = (s, b) => strategy.prime!(s, b)
+  }
   if (strategy.onTick) {
     wrapped.onTick = async (ctx: TickCtx) => {
-      if (flattening) return []
       try {
         return await strategy.onTick!(ctx)
       } catch (e) {
@@ -461,22 +456,6 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
     }
   }
 
-  const flattenStep = async (t: number) => {
-    if (t - lastFlatten < verifyMs || (flatDone && mode === 'dry')) return
-    lastFlatten = t
-    await exclusive(async () => {
-      try {
-        const report = await pullout(exchange, meta, { execute: true, waitMs: opts.pulloutWaitMs, log })
-        flatDone = report.remaining.length === 0
-        log('daemon.flatten', { flat: flatDone, tmn: Math.round(report.tmn), remaining: report.remaining, dust: report.dust, unroutable: report.unroutable })
-        if (!flatDone) console.error(`WARNING: flatten incomplete, still holding ${report.remaining.map((h) => h.asset).join(', ')}. Retrying.`)
-        apiOk()
-      } catch (e) {
-        apiFail('flatten', e)
-      }
-    })
-  }
-
   const sleepUntilDone = async (ms: number) => {
     const until = Date.now() + ms
     while (!done() && Date.now() < until) await sleep(Math.min(250, until - Date.now()))
@@ -487,8 +466,7 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
       const t = Date.now()
       try {
         applyPhase(t)
-        if (flattening) await flattenStep(t)
-        else if (warm && wrapped.onTick) await tickAll(t)
+        if (warm && wrapped.onTick) await tickAll(t)
         checkDegraded(t)
       } catch (e) {
         log('daemon.loop_error', { error: String(e) })
@@ -568,7 +546,6 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
     symbols,
     runEnd: runEndIso,
     entryCutoffAt: new Date(cutoffAt).toISOString(),
-    flattenAt: new Date(flattenAt).toISOString(),
     startEquity,
     resumed,
     stateKept,
@@ -589,17 +566,16 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
   }
 
   const reason = stopping ? 'signal' : 'run_end'
-  if (stopping) {
-    applyPhase(Date.now())
-    try {
-      for (const o of await exchange.openOrders()) {
-        if (o.side !== 'BUY') continue
-        await exchange.cancel(o.clientId)
-        log('daemon.cancel_entry', { clientId: o.clientId, symbol: o.symbol })
-      }
-    } catch (e) {
-      log('daemon.shutdown_error', { error: String(e) })
+  // Unfilled entries must not fill later with no process watching their stop. Nothing is sold here: selling is `pullout --yes`, run by hand.
+  applyPhase(Date.now())
+  try {
+    for (const o of await exchange.openOrders()) {
+      if (o.side !== 'BUY') continue
+      await exchange.cancel(o.clientId)
+      log('daemon.cancel_entry', { clientId: o.clientId, symbol: o.symbol })
     }
+  } catch (e) {
+    log('daemon.shutdown_error', { error: String(e) })
   }
   persist()
 
@@ -617,7 +593,7 @@ export async function runDaemon(opts: DaemonOpts): Promise<DaemonResult> {
   if (!flat) {
     const msg = stopping
       ? `positions remain open: ${positionsLeft.join(', ')}. Stops are monitored by this process only, so they are now UNPROTECTED. Restart the daemon or run pullout --yes.`
-      : `RUN_END reached but still holding: ${positionsLeft.join(', ')}. Run pullout --yes now.`
+      : `RUN_END reached, nothing was sold automatically. Still holding: ${positionsLeft.join(', ')}. Stops are no longer monitored. Run pullout --yes when you decide to sell.`
     log('daemon.unflat_exit', { reason, positionsLeft })
     console.error(`!!! WARNING: ${msg}`)
   }

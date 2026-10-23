@@ -1,7 +1,15 @@
 import type { Strategy } from '../types'
+import { createBreakoutModel, createBreakoutStrategy } from './breakout'
+import { createTradeEngine, type EngineDeps, type TradeEngine } from './engine'
 import { createIctStrategy } from './ict'
+import { createWashoutModel } from './washout'
 
-export { createIctStrategy }
+export { createBreakoutStrategy, createIctStrategy }
+
+// The default: trend breakouts plus washout bounces in one position book (breakout has priority on each bar).
+export function createComboStrategy(deps: EngineDeps): TradeEngine {
+  return createTradeEngine('combo', [createBreakoutModel(), createWashoutModel()], deps)
+}
 
 // Placeholder that never places an order.
 export const noop: Strategy = { name: 'noop', onBar: () => [] }

@@ -102,7 +102,6 @@ export function createDemo(store: Store, opts: DemoOptions = {}) {
   let dayPeak = START
   let haltedDay = false
   let consecutiveLosses = 0
-  let pausedUntil = 0
   let idn = 0
   let lastHb = 0
   let lastTick = 0
@@ -113,7 +112,6 @@ export function createDemo(store: Store, opts: DemoOptions = {}) {
   const t0 = nowMs() - (opts.backlogMinutes ?? 95) * 60_000
   const runEnd = nowMs() + (3 * 60 + 40) * 60_000
   const cutoff = runEnd - 45 * 60_000
-  const flatten = runEnd - 15 * 60_000
 
   const emit = (t: number, event: string, data: Obj = {}) => {
     store.ingest({ ts: new Date(t).toISOString(), sha: SHA, event, ...data })
@@ -129,7 +127,6 @@ export function createDemo(store: Store, opts: DemoOptions = {}) {
   function blockReason(t: number): string | null {
     if (store.killSwitch()) return 'kill switch file'
     if (haltedDay) return `daily loss halt: equity ${Math.round(equity())} is ${((1 - equity() / dayPeak) * 100).toFixed(1)}% below the day peak`
-    if (t < pausedUntil) return `loss pause: ${consecutiveLosses} losses in a row, resumes in ${Math.ceil((pausedUntil - t) / 60_000)} min`
     return null
   }
 
@@ -160,7 +157,7 @@ export function createDemo(store: Store, opts: DemoOptions = {}) {
     for (const p of positions) marks[p.symbol] = fx(p.symbol, price[p.symbol]!)
     emit(t, 'daemon.heartbeat', {
       mode: 'paper',
-      phase: t >= flatten ? 'flattening' : t >= cutoff ? 'entries_off' : 'trading',
+      phase: t >= cutoff ? 'entries_off' : 'trading',
       equity: Math.round(e),
       guard: guardState(),
       blockReason: blockReason(t),
@@ -300,10 +297,7 @@ export function createDemo(store: Store, opts: DemoOptions = {}) {
     const pnl = proceeds - cost
     const eqAtEntry = equity()
     realized += pnl
-    if (pnl < 0) {
-      consecutiveLosses++
-      if (consecutiveLosses >= 3) pausedUntil = t + 90_000
-    } else consecutiveLosses = 0
+    consecutiveLosses = pnl < 0 ? consecutiveLosses + 1 : 0
     emit(t, 'exit', { symbol: p.symbol, id: p.id, how, qty: p.qty, entry: p.entry, pnlTmn: Math.round(pnl), pnlFraction: pnl / eqAtEntry, equityAtEntry: Math.round(eqAtEntry), dustQty: 0, feeTmn: Math.round(p.qty * p.entry * MAKER + p.fees + p.qtyLeft * px * TAKER) })
   }
 
@@ -312,7 +306,7 @@ export function createDemo(store: Store, opts: DemoOptions = {}) {
     if (started) return
     started = true
     const now = nowMs()
-    emit(t0, 'daemon.start', { mode: 'paper', symbols: names, runEnd: new Date(runEnd).toISOString(), entryCutoffAt: new Date(cutoff).toISOString(), flattenAt: new Date(flatten).toISOString(), startEquity: START, resumed: false, strategy: 'ict', startHoldings: [] })
+    emit(t0, 'daemon.start', { mode: 'paper', symbols: names, runEnd: new Date(runEnd).toISOString(), entryCutoffAt: new Date(cutoff).toISOString(), startEquity: START, resumed: false, strategy: 'ict', startHoldings: [] })
     for (const s of names) emit(t0 + 1500, 'poll.warmup', { symbol: s, bars: 1440 })
     const dt = 30_000
     const wasScenario = scenario

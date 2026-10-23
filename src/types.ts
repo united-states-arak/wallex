@@ -90,4 +90,8 @@ export interface Strategy {
   onTick?(ctx: TickCtx): Promise<OrderReq[]> | OrderReq[]
   // Optional: stop opening new positions (end of run). Existing positions are still managed.
   setEntriesEnabled?(enabled: boolean): void
+  // Optional warm-up: runners load `primeDays` of closed 1m candles per symbol at start and pass them to `prime` once,
+  // so indicators on slow timeframes are ready from the first live minute.
+  primeDays?: number
+  prime?(symbol: string, bars: Candle[]): void
 }

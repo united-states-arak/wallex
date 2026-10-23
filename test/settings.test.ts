@@ -45,10 +45,10 @@ describe('defaults reproduce the previous behaviour', () => {
     expect(s.risk.maxPositions).toBe(2)
     expect(s.fees).toEqual({ maker: 0.0025, taker: 0.003 })
     expect(s.paper).toEqual({ spreadBps: 10, slippageBps: 10, startTmn: 5_000_000 })
-    expect(s.market.symbols).toEqual(['PEPETMN', 'PUMPTMN', 'DOGETMN'])
+    expect(s.market.symbols).toEqual(['PEPETMN', 'PUMPTMN', 'USOONTMN', 'BNBTMN', 'ETHTMN', 'XRPTMN', 'ARBTMN', 'DOGETMN', 'ADATMN', 'STMN', 'SOLTMN', 'APETMN', 'TRXTMN', 'LTCTMN', 'AAVETMN'])
     expect(s.market.universe).toMatchObject({ minVolTmn: 3e9, maxSpreadPct: 0.01, minRangePct: 0.03, max: 12 })
     expect(s.strategy.ict).toMatchObject({ maxSpreadPct: 0.01, minNetRr: 1.5, tp1Fraction: 0.5, timeStopBars: 240, stopExitSlip: 0.005, stopExitSlipMax: 0.12, breakEvenBuffer: 0.006 })
-    expect(s.run).toMatchObject({ entryCutoffMin: 45, flattenMin: 15, defaultHours: 24, end: '' })
+    expect(s.run).toMatchObject({ entryCutoffMin: 45, defaultHours: 24, end: '' })
     expect(s.wallex).toMatchObject({ baseUrl: 'https://api.wallex.ir', requestTimeoutMs: 10_000, pollMs: 20_000, tickMs: 5_000 })
     expect(s.ai).toMatchObject({ model: 'gpt-4o-mini', timeoutMs: 12_000, failMode: 'approve', newsTtlMin: 15, newsTimeoutMs: 8000, maxHeadlines: 15, contextWindow: 128_000 })
     expect(s.ai.feeds.map((f) => f.source)).toEqual(['CoinDesk', 'Cointelegraph'])
@@ -76,7 +76,6 @@ describe('defaults reproduce the previous behaviour', () => {
     const l = defaultLimits({})
     expect(l).toMatchObject({
       riskPct: 0.01, lock1Pnl: 0.15, lock1Risk: 0.005, lock2Pnl: 0.3, lock2Risk: 0.0025, dailyLossHalt: 0.12, hardDrawdown: 0.3,
-      lossStreak: 3, lossPauseSec: 1800, maxEntriesPerHour: 6,
     })
     expect(l.killFile).toBe(resolve(import.meta.dir, '../STOP'))
   })
@@ -86,7 +85,7 @@ describe('defaults reproduce the previous behaviour', () => {
     expect(r.ok).toBe(true)
     expect(r.lossPct).toBeCloseTo(0.01, 3)
     expect(cfg).toMatchObject({ makerFee: 0.0025, takerFee: 0.003, spreadBps: 10, slippageBps: 10, startTmn: 5_000_000, dataDir: 'data', logDir: 'logs', blockedFile: 'config/blocked-markets.txt', apiKey: '', baseUrl: 'https://api.wallex.ir' })
-    expect(cfg.symbols).toEqual(['PEPETMN', 'PUMPTMN', 'DOGETMN'])
+    expect(cfg.symbols).toEqual(['PEPETMN', 'PUMPTMN', 'USOONTMN', 'BNBTMN', 'ETHTMN', 'XRPTMN', 'ARBTMN', 'DOGETMN', 'ADATMN', 'STMN', 'SOLTMN', 'APETMN', 'TRXTMN', 'LTCTMN', 'AAVETMN'])
   })
 
   test('config/default.toml is the same as the code defaults', () => {
@@ -106,24 +105,24 @@ describe('defaults reproduce the previous behaviour', () => {
 
 describe('layering', () => {
   const files = {
-    'default.toml': '[risk]\nriskPct = 0.02\nmaxPositions = 3\nlossStreak = 4\n[fees]\nmaker = 0.002\n',
+    'default.toml': '[risk]\nriskPct = 0.02\nmaxPositions = 3\nhardDrawdown = 0.4\n[fees]\nmaker = 0.002\n',
     'profiles/p.toml': '[risk]\nriskPct = 0.015\nmaxPositions = 4\n',
     'local.toml': '[risk]\nmaxPositions = 5\n',
   }
 
   test('later layers win and sources are tracked', () => {
-    const s = load(files, { profile: 'p', env: { MAX_ENTRIES_PER_HOUR: '9', STARCOACH__risk__lossStreak: '7' }, overrides: { risk: { riskPct: 0.03 } } })
+    const s = load(files, { profile: 'p', env: { DAILY_LOSS_HALT: '0.09', STARCOACH__risk__hardDrawdown: '0.35' }, overrides: { risk: { riskPct: 0.03 } } })
     expect(s.risk.riskPct).toBe(0.03)
     expect(s.risk.maxPositions).toBe(5)
-    expect(s.risk.lossStreak).toBe(7)
-    expect(s.risk.maxEntriesPerHour).toBe(9)
+    expect(s.risk.hardDrawdown).toBe(0.35)
+    expect(s.risk.dayLossHalt).toBe(0.09)
     expect(s.fees.maker).toBe(0.002)
     expect(s.fees.taker).toBe(0.003)
     const src = Object.fromEntries(explain(s).map((r) => [r.path, r.source]))
     expect(src['risk.riskPct']).toBe('override')
     expect(src['risk.maxPositions']).toBe('file:local.toml')
-    expect(src['risk.lossStreak']).toBe('env:STARCOACH__risk__lossStreak')
-    expect(src['risk.maxEntriesPerHour']).toBe('env:MAX_ENTRIES_PER_HOUR')
+    expect(src['risk.hardDrawdown']).toBe('env:STARCOACH__risk__hardDrawdown')
+    expect(src['risk.dayLossHalt']).toBe('env:DAILY_LOSS_HALT')
     expect(src['fees.maker']).toBe('file:default.toml')
     expect(src['fees.taker']).toBe('default')
   })
@@ -164,8 +163,8 @@ describe('environment', () => {
       env: {
         WALLEX_BASE_URL: 'https://example.test', MAKER_FEE: '0.001', TAKER_FEE: '0.002', PAPER_SPREAD_BPS: '5', PAPER_SLIPPAGE_BPS: '7', START_TMN: '9000000',
         SYMBOLS: 'AAATMN, BBBTMN', RISK_PCT: '0.004', LOCK1_PNL: '0.1', LOCK1_RISK: '0.003', LOCK2_PNL: '0.2', LOCK2_RISK: '0.002', DAILY_LOSS_HALT: '0.1',
-        HARD_DRAWDOWN: '0.25', LOSS_STREAK: '2', LOSS_PAUSE_MIN: '10', MAX_ENTRIES_PER_HOUR: '4', AI_BASE_URL: ' https://ai.test/v1/ ', AI_MODEL: 'm', AI_TIMEOUT_MS: '500',
-        AI_FAIL_MODE: ' VETO ', RUN_END: '2030-01-01T00:00:00Z', ENTRY_CUTOFF_MIN: '60', FLATTEN_MIN: '20',
+        HARD_DRAWDOWN: '0.25', AI_BASE_URL: ' https://ai.test/v1/ ', AI_MODEL: 'm', AI_TIMEOUT_MS: '500',
+        AI_FAIL_MODE: ' VETO ', RUN_END: '2030-01-01T00:00:00Z', ENTRY_CUTOFF_MIN: '60',
         OTEL_PROMETHEUS_PORT: '9999', OTEL_PROMETHEUS_HOST: '0.0.0.0', OTEL_SDK_DISABLED: 'true', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel:4318',
       },
     })
@@ -173,13 +172,13 @@ describe('environment', () => {
     expect(s.fees).toEqual({ maker: 0.001, taker: 0.002 })
     expect(s.paper).toEqual({ spreadBps: 5, slippageBps: 7, startTmn: 9_000_000 })
     expect(s.market.symbols).toEqual(['AAATMN', 'BBBTMN'])
-    expect(s.risk).toMatchObject({ riskPct: 0.004, dayLossHalt: 0.1, hardDrawdown: 0.25, lossStreak: 2, lossPauseMin: 10, maxEntriesPerHour: 4 })
+    expect(s.risk).toMatchObject({ riskPct: 0.004, dayLossHalt: 0.1, hardDrawdown: 0.25 })
     expect(s.risk.lockTiers).toEqual([{ pnl: 0.1, riskPct: 0.003 }, { pnl: 0.2, riskPct: 0.002 }])
     expect(s.ai).toMatchObject({ baseUrl: 'https://ai.test/v1', model: 'm', timeoutMs: 500, failMode: 'veto' })
-    expect(s.run).toMatchObject({ end: '2030-01-01T00:00:00Z', entryCutoffMin: 60, flattenMin: 20 })
+    expect(s.run).toMatchObject({ end: '2030-01-01T00:00:00Z', entryCutoffMin: 60 })
     expect(s.telemetry).toMatchObject({ prometheusPort: 9999, prometheusHost: '0.0.0.0', enabled: false, otlpEndpoint: 'http://otel:4318' })
-    const l = defaultLimits({ RISK_PCT: '0.004', LOCK1_PNL: '0.1', LOSS_PAUSE_MIN: '10', LOCK2_RISK: '0.002' })
-    expect(l).toMatchObject({ riskPct: 0.004, lock1Pnl: 0.1, lossPauseSec: 600, lock2Risk: 0.002 })
+    const l = defaultLimits({ RISK_PCT: '0.004', LOCK1_PNL: '0.1', LOCK2_RISK: '0.002' })
+    expect(l).toMatchObject({ riskPct: 0.004, lock1Pnl: 0.1, lock2Risk: 0.002 })
   })
 
   test('every alias maps to a real setting', () => {
@@ -306,8 +305,8 @@ describe('validation', () => {
     expect(bad('[detect]\nminStopPct = 0.03')[0]).toContain('detect.minStopPct: must be less than detect.maxStopPct')
     expect(bad('[detect]\noteLow = 0.9')[0]).toContain('detect.oteLow')
     expect(bad('[risk]\ndayLossHalt = 0.5')[0]).toContain('risk.dayLossHalt: must be <= risk.hardDrawdown')
-    expect(bad('[run]\nflattenMin = 2000')[0]).toContain('run.flattenMin: must be less than the run length')
-    expect(bad('[run]\nentryCutoffMin = 5')[0]).toContain('run.entryCutoffMin: must be >= run.flattenMin')
+    expect(bad('[run]\nentryCutoffMin = 2000')[0]).toContain('run.entryCutoffMin: must be less than the run length')
+    expect(bad('[run]\nflattenMin = 15')[0]).toContain('flattenMin')
     expect(bad('[detect]\nsessionStartHour = 22')[0]).toContain('detect.sessionStartHour')
     expect(bad('[[risk.lockTiers]]\npnl = 0.3\nriskPct = 0.005\n[[risk.lockTiers]]\npnl = 0.2\nriskPct = 0.004')[0]).toContain('risk.lockTiers.1.pnl')
     expect(bad('[[risk.lockTiers]]\npnl = 0.3')[0]).toContain('risk.lockTiers.0.riskPct: is missing')
@@ -390,7 +389,7 @@ describe('profiles shipped in config/', () => {
     const s = real('aggressive')
     expect(s.strategy.ict.minNetRr).toBe(1.3)
     expect(s.detect.minScore).toBe(3)
-    expect(s.risk).toMatchObject({ maxEntriesPerHour: 10, dayLossHalt: 0.15, riskPct: 0.01, maxPositionPct: 0.5 })
+    expect(s.risk).toMatchObject({ dayLossHalt: 0.15, riskPct: 0.01, maxPositionPct: 0.5 })
     expect(s.detect.minStopPct).toBe(0.01)
     expect(s.detect.maxStopPct).toBe(0.025)
   })

@@ -1,16 +1,18 @@
-.git
-node_modules
-logs
-state
-data
-control
-STOP
-.env
-.env.*
-!.env.example
+# Allowlist: the image needs only what the Dockerfile copies. Everything else (secrets, logs, state, data,
+# arena research, video, docs, tests, node_modules) stays out of the build context.
+*
+!package.json
+!bun.lock
+!tsconfig.json
+!src/
+!config/
+!docker/
+
+# never ship local overrides or secrets, even inside the allowed folders
 config/local.toml
-docs/img
-test
-*.md
-!config/README.md
-.fx
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.md
+**/.DS_Store

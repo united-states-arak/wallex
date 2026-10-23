@@ -1,0 +1,11 @@
+# gitleaks configuration (used by the `secrets` job in .github/workflows/ci.yml).
+# Default rules, plus an allowlist for the unit tests: they contain made-up keys on purpose
+# (redaction, env validation and config-loader tests) that the generic-api-key rule would flag.
+title = "starcoach-trader"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials used as test fixtures"
+paths = ['''^test/[^/]+\.test\.ts$''']

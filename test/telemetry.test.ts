@@ -213,7 +213,7 @@ test('real daemon heartbeat and order events feed the metrics', async () => {
   try {
     const runEnd = Date.now() + 2_500
     const res = runDaemon({
-      tickMs: 100, pollMs: 100, verifyMs: 200, pulloutWaitMs: 0, signals: false,
+      tickMs: 100, pollMs: 100, signals: false,
       rest: {
         hasKey: true,
         markets: async () => meta,
@@ -226,7 +226,7 @@ test('real daemon heartbeat and order events feed the metrics', async () => {
         },
       },
       mode: 'paper', symbols: ['PEPETMN'], meta, ex: new PaperExchange(meta, new Set(), { TMN: 5_000_000 }),
-      log: t, runEnd, entryCutoffMin: 0.01, flattenMin: 0.005, stateDir: dir,
+      log: t, runEnd, entryCutoffMin: 0.01, stateDir: dir,
       makeStrategy: () => ({
         name: 'stub',
         async onBar() {

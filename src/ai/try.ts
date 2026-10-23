@@ -1,32 +1,23 @@
-// Manual check: AI_BASE_URL=https://host/v1 AI_API_KEY=... AI_MODEL=... bun src/ai/try.ts
+// Manual check of the AI supervisor against the configured provider, with live news: bun src/ai/try.ts
+// Reviews a sample breakout candidate shaped exactly like the ones the strategy sends (see src/strategy/breakout).
 import { createSupervisor } from './supervisor'
-import type { SetupCandidate } from '../ict/types'
 import type { ReviewInput } from './types'
 
-const nowSec = Math.floor(Date.now() / 1000)
-const entry = 0.00001
-const setup: SetupCandidate = {
-  model: 'sweep',
-  symbol: 'PEPETMN',
-  detectedAt: nowSec,
-  entry,
-  stop: entry * 0.98,
-  tp1: entry * 1.045,
-  score: 7,
-  scoreParts: { sweep: 2, mss: 2, fvg: 2, htfBias: 1 },
-  sweep: { level: entry * 0.985, kind: 'equal-lows', extreme: entry * 0.981, t: nowSec - 600 },
-  mss: { level: entry * 1.01, t: nowSec - 300, displacementAtr: 1.9 },
-  fvg: { low: entry * 0.995, high: entry * 1.005, ce: entry, t: nowSec - 300 },
-  dealingRange: { low: entry * 0.97, high: entry * 1.06 },
-  expiresAt: nowSec + 3600,
-  invalidateBelow: entry * 0.985,
-  rationale: 'Sell-side liquidity swept below equal lows, displacement closed above the last swing high, entry at the FVG midpoint.',
-}
+const entry = 41_260
+const stop = 39_550
 const input: ReviewInput = {
-  setup,
+  setup: {
+    symbol: 'ARBTMN',
+    model: 'breakout',
+    entry,
+    stop,
+    rationale:
+      '96h breakout: the 1h close 41,230 is above the 96h high 40,900 on 1.8x average volume, price is above its rising 96h EMA (39,800) and 80% of markets are above their 168h EMA. Initial stop 4 ATR below (39,550), trailing stop 8 ATR below the highest high.',
+    features: { breakoutLevel: 40_900, hourClose: 41_230, atr: 420, trendEma: 39_800, volumeVsAverage: 1.8, marketBreadthPct: 80, stopDistancePct: 4.14, initialStopAtr: 4, trailingStopAtr: 8 },
+  },
   equityTmn: 5_000_000,
-  proposedNotionalTmn: 1_900_000,
-  proposedPctOfEquity: 0.38,
+  proposedNotionalTmn: 1_034_000,
+  proposedPctOfEquity: 0.207,
   openPositions: [],
   dayPnlPct: 0,
 }

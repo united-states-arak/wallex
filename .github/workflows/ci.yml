@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1" # weekly: catches newly published advisories without a code change
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+      - name: Install (locked, no install scripts)
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Type check
+        run: bun run typecheck
+      - name: Config and profiles validate
+        run: bun run config validate
+      - name: Unit and security tests
+        run: bun run test
+      - name: Dependency audit
+        run: bun audit
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The gitleaks CLI rather than gitleaks-action, which needs a license key on organization repos.
+      # Rules and the allowlist for the fake keys in test/*.test.ts live in .gitleaks.toml.
+      - name: Install gitleaks (pinned, checksum verified)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$base/$tarball"
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --check --ignore-missing "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "$tarball" gitleaks
+      - name: Secret scan (full history)
+        run: ./gitleaks git --redact --verbose --exit-code 1 .
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (non-root, no scripts)
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t starcoach-trader:ci .
+      - name: Image runs as a non-root user
+        run: test "$(docker run --rm --entrypoint id starcoach-trader:ci -u)" != "0"

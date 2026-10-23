@@ -8,7 +8,8 @@ const SYM = 'PEPETMN'
 const T0 = 1_700_000_000 - (1_700_000_000 % 60)
 const N = 700
 const SPLIT = 0.57
-const splitIdx = Math.floor(N * SPLIT)
+// Same arithmetic as walkForward (N * SPLIT alone is 398.99999999999994, one bar too early)
+const splitIdx = (Math.floor(T0 + N * 60 * SPLIT) - T0) / 60
 
 const summary = { returnPct: 1, maxDrawdownPct: 2, feesTmn: 3, volumeTmn: 4 }
 const ev = (event: string, data: Record<string, unknown>) => ({ event, data })

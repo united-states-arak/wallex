@@ -6,7 +6,7 @@ import type { WallexRest } from '../wallex/rest'
 const DAY = 86_400
 
 // Wallex returns `no_data` for 1m ranges over about 1.5 days, so fetch one UTC day at a time.
-export async function loadCandles(rest: WallexRest, symbol: string, fromSec: number, toSec: number): Promise<Candle[]> {
+export async function loadCandles(rest: Pick<WallexRest, 'history'>, symbol: string, fromSec: number, toSec: number): Promise<Candle[]> {
   const out = new Map<number, Candle>()
   const { dataDir, cacheCompleteAfterSec } = getSettings().data
   const dir = `${dataDir}/candles/${symbol}`

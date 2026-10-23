@@ -12,14 +12,11 @@ export interface GuardLimits {
   lock2Risk: number
   dailyLossHalt: number
   hardDrawdown: number
-  lossStreak: number
-  lossPauseSec: number
-  maxEntriesPerHour: number
   // Path of the kill switch file. Empty string disables the check.
   killFile: string
 }
 
-export type Guard = RiskGuard & { save(): void; recordEntry(now: number): void }
+export type Guard = RiskGuard & { save(): void }
 
 const REPO_ROOT = resolve(import.meta.dir, '../..')
 
@@ -36,17 +33,14 @@ export function defaultLimits(env?: Record<string, string | undefined>): GuardLi
     lock2Risk: t2?.riskPct ?? r.riskPct,
     dailyLossHalt: r.dayLossHalt,
     hardDrawdown: r.hardDrawdown,
-    lossStreak: r.lossStreak,
-    lossPauseSec: r.lossPauseMin * 60,
-    maxEntriesPerHour: r.maxEntriesPerHour,
     killFile: r.killFile ? resolve(REPO_ROOT, r.killFile) : '',
   }
 }
 
 export function writeJsonAtomic(path: string, data: unknown) {
-  mkdirSync(dirname(path), { recursive: true })
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
   const tmp = `${path}.tmp`
-  writeFileSync(tmp, JSON.stringify(data))
+  writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 })
   renameSync(tmp, path)
 }
 
@@ -59,8 +53,6 @@ interface Persisted {
   dailyHaltDay: number | null
   hardHalt: string | null
   consecutiveLosses: number
-  pausedUntil: number
-  entries: number[]
   lastNow: number
 }
 
@@ -72,13 +64,17 @@ function load(path: string | undefined, startEquity: number): Persisted | null {
   try {
     const j = JSON.parse(readFileSync(path, 'utf8'))
     if (j?.startEquity !== startEquity) return null
-    const ok = [j.equity, j.day, j.dayStart, j.dayPeak, j.consecutiveLosses, j.pausedUntil, j.lastNow].every(isNum)
-    if (!ok || !Array.isArray(j.entries)) return null
+    if (![j.equity, j.day, j.dayStart, j.dayPeak, j.consecutiveLosses, j.lastNow].every(isNum)) return null
     return {
-      ...j,
+      startEquity: j.startEquity,
+      equity: j.equity,
+      day: j.day,
+      dayStart: j.dayStart,
+      dayPeak: j.dayPeak,
       dailyHaltDay: isNum(j.dailyHaltDay) ? j.dailyHaltDay : null,
       hardHalt: typeof j.hardHalt === 'string' ? j.hardHalt : null,
-      entries: j.entries.filter(isNum),
+      consecutiveLosses: j.consecutiveLosses,
+      lastNow: j.lastNow,
     }
   } catch {
     return null
@@ -103,8 +99,6 @@ export function createGuard(opts: {
     dailyHaltDay: null,
     hardHalt: null,
     consecutiveLosses: 0,
-    pausedUntil: 0,
-    entries: [],
     lastNow: t0,
   }
   let lastWritten = ''
@@ -164,19 +158,7 @@ export function createGuard(opts: {
 
     recordTrade(pnlFraction, now) {
       touch(now)
-      if (pnlFraction < 0) {
-        s.consecutiveLosses += 1
-        if (s.consecutiveLosses >= L.lossStreak) s.pausedUntil = now + L.lossPauseSec
-      } else {
-        s.consecutiveLosses = 0
-      }
-      save()
-    },
-
-    recordEntry(now) {
-      touch(now)
-      s.entries = s.entries.filter((t) => t > now - 3600)
-      s.entries.push(now)
+      s.consecutiveLosses = pnlFraction < 0 ? s.consecutiveLosses + 1 : 0
       save()
     },
 
@@ -187,9 +169,6 @@ export function createGuard(opts: {
       if (before !== `${s.day}|${s.dayPeak}`) save()
       if (s.hardHalt) return s.hardHalt
       if (dailyHalted()) return `daily loss halt: equity ${Math.round(s.equity)} is ${((1 - s.equity / s.dayPeak) * 100).toFixed(1)}% below the day peak`
-      if (now < s.pausedUntil) return `loss pause: ${s.consecutiveLosses} losses in a row, resumes in ${Math.ceil((s.pausedUntil - now) / 60)} min`
-      const recent = s.entries.filter((t) => t > now - 3600).length
-      if (recent >= L.maxEntriesPerHour) return `max entries per hour (${L.maxEntriesPerHour})`
       return null
     },
 

@@ -16,7 +16,6 @@ export interface Settings {
   run: {
     end: string
     entryCutoffMin: number
-    flattenMin: number
     defaultHours: number
   }
   wallex: {
@@ -49,12 +48,39 @@ export interface Settings {
     dayLossHalt: number
     hardDrawdown: number
     lockTiers: LockTier[]
-    lossStreak: number
-    lossPauseMin: number
-    maxEntriesPerHour: number
     killFile: string
+    maxOrderTmn: number
+    maxPriceDeviation: number
   }
   strategy: {
+    active: 'combo' | 'breakout' | 'ict' | 'noop'
+    washout: {
+      signalMinutes: number
+      lookbackMinutes: number
+      dropPct: number
+      takeProfitPct: number
+      stopPct: number
+      maxHoldMinutes: number
+      crashDropPct: number
+      crashBreadthMax: number
+      riskMult: number
+    }
+    breakout: {
+      lookbackHours: number
+      emaHours: number
+      atrHours: number
+      stopAtr: number
+      trailAtr: number
+      volumeMult: number
+      maxChaseAtr: number
+      breadthMin: number
+      breadthEmaHours: number
+      maxHoldHours: number
+      warmupDays: number
+      entrySlip: number
+      stopExitSlip: number
+      stopExitSlipMax: number
+    }
     ict: {
       maxSpreadPct: number
       minNetRr: number

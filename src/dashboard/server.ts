@@ -1,6 +1,8 @@
 import { parseArgs } from 'node:util'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { env } from '../env'
+import { safeEqual } from '../security/http'
 import { getSettings, type Settings } from '../settings'
 import { createDemo, type Scenario } from './demo'
 import { loadReplay } from './replay'
@@ -17,6 +19,7 @@ export interface DashboardOptions {
   seed?: number
   refreshMs?: number
   settings?: Settings
+  token?: string // kill-switch token. Defaults to DASHBOARD_TOKEN
 }
 
 const PUBLIC = resolve(import.meta.dir, 'public')
@@ -33,10 +36,17 @@ const ASSETS: Record<string, string> = {
 const HEADERS = {
   'cache-control': 'no-store',
   'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
   'referrer-policy': 'no-referrer',
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-resource-policy': 'same-origin',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
   'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+const MAX_BODY = 1024 // every request body is a tiny JSON object
+const MAX_QUERY = 200 // longest accepted log filter
+const POSTS_PER_MIN = 20 // state-changing requests per minute, for the whole process
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...HEADERS, 'content-type': 'application/json; charset=utf-8' } })
 const fail = (status: number, error: string) => json({ error }, status)
@@ -54,6 +64,9 @@ export function startDashboard(opts: DashboardOptions = {}) {
     limits: limitsFromSettings(settings),
   }
   const refreshMs = opts.refreshMs ?? 500
+  const token = String(opts.token ?? env.DASHBOARD_TOKEN ?? '').trim()
+  const remoteBind = !LOOPBACK.has(host.toLowerCase())
+  const posts: number[] = []
   const stoppers: (() => void)[] = []
 
   let store: Store
@@ -101,6 +114,36 @@ export function startDashboard(opts: DashboardOptions = {}) {
     } else if (origin === 'null') return false
     const site = req.headers.get('sec-fetch-site')
     return !site || site === 'same-origin' || site === 'none'
+  }
+
+  // The kill switch changes what the bot does, so it is authenticated whenever a token is set, and refused outright when the
+  // dashboard is reachable from other machines without one.
+  const authorize = (req: Request): Response | null => {
+    if (!token) return remoteBind ? fail(403, 'set DASHBOARD_TOKEN to use the kill switch on a dashboard that is not bound to localhost') : null
+    const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
+    const given = req.headers.get('x-dashboard-token') ?? bearer
+    return given && safeEqual(given, token) ? null : fail(401, 'dashboard token required')
+  }
+
+  const rateLimited = () => {
+    const now = Date.now()
+    while (posts.length && now - posts[0]! > 60_000) posts.shift()
+    if (posts.length >= POSTS_PER_MIN) return true
+    posts.push(now)
+    return false
+  }
+
+  // Bounded JSON body: refuses oversized or malformed input before it is parsed.
+  const readBody = async (req: Request): Promise<{ ok: true; value: unknown } | { ok: false; res: Response }> => {
+    const declared = Number(req.headers.get('content-length') ?? 0)
+    if (declared > MAX_BODY) return { ok: false, res: fail(413, 'body too large') }
+    const text = await req.text().catch(() => '')
+    if (text.length > MAX_BODY) return { ok: false, res: fail(413, 'body too large') }
+    try {
+      return { ok: true, value: JSON.parse(text) }
+    } catch {
+      return { ok: false, res: fail(400, 'body must be JSON') }
+    }
   }
 
   const stream = (req: Request) => {
@@ -158,7 +201,9 @@ export function startDashboard(opts: DashboardOptions = {}) {
         if (pathname === '/api/log') {
           store.refresh(refreshMs)
           const limit = Number(url.searchParams.get('limit') ?? 200)
-          return json(store.queryLog({ event: url.searchParams.get('event') ?? '', q: url.searchParams.get('q') ?? '', limit: Number.isFinite(limit) ? limit : 200 }))
+          const event = (url.searchParams.get('event') ?? '').slice(0, MAX_QUERY)
+          const q = (url.searchParams.get('q') ?? '').slice(0, MAX_QUERY)
+          return json(store.queryLog({ event, q, limit: Number.isFinite(limit) ? limit : 200 }))
         }
         return fail(404, 'not found')
       }
@@ -166,13 +211,12 @@ export function startDashboard(opts: DashboardOptions = {}) {
       if (req.method === 'POST' && pathname === '/api/stop') {
         if (!sameOrigin(req)) return fail(403, 'cross-origin request refused')
         if (req.headers.get('x-confirm') !== 'stop') return fail(400, 'missing x-confirm: stop header')
-        let body: unknown
-        try {
-          body = await req.json()
-        } catch {
-          return fail(400, 'body must be JSON')
-        }
-        const enabled = (body as { enabled?: unknown } | null)?.enabled
+        const denied = authorize(req)
+        if (denied) return denied
+        if (rateLimited()) return fail(429, 'too many requests')
+        const parsed = await readBody(req)
+        if (!parsed.ok) return parsed.res
+        const enabled = (parsed.value as { enabled?: unknown } | null)?.enabled
         if (typeof enabled !== 'boolean') return fail(400, 'enabled must be a boolean')
         try {
           const r = store.setKillSwitch(enabled)
@@ -186,7 +230,9 @@ export function startDashboard(opts: DashboardOptions = {}) {
       if (req.method === 'POST' && pathname === '/api/demo') {
         if (!demo) return fail(404, 'not in demo mode')
         if (!sameOrigin(req)) return fail(403, 'cross-origin request refused')
-        const body = (await req.json().catch(() => null)) as { scenario?: unknown } | null
+        if (rateLimited()) return fail(429, 'too many requests')
+        const parsed = await readBody(req)
+        const body = (parsed.ok ? parsed.value : null) as { scenario?: unknown } | null
         if (body?.scenario !== 'halt' && body?.scenario !== 'normal') return fail(400, 'scenario must be halt or normal')
         demo.setScenario(body.scenario)
         return json({ ok: true, scenario: body.scenario })
@@ -238,5 +284,7 @@ if (import.meta.main) {
     scenario: values.scenario === 'halt' ? 'halt' : 'normal',
   })
   console.log(`starcoach dashboard (${d.source}) on ${d.url}`)
-  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) console.error(`WARNING: bound to ${host}. The dashboard has no authentication and can toggle the STOP file. Keep it on localhost.`)
+  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
+    console.error(env.DASHBOARD_TOKEN ? `note: bound to ${host}. The kill switch requires DASHBOARD_TOKEN. Publish the port on localhost only or put it behind your own authenticated proxy.` : `note: bound to ${host} without DASHBOARD_TOKEN: the kill-switch button is disabled. Set DASHBOARD_TOKEN (16+ characters) to enable it.`)
+  }
 }

@@ -1,88 +1,82 @@
-# Risk management
+# Risk and capital management
 
-All limits live in code. The AI cannot raise any of them. Sizing is in `src/risk/size.ts`, account limits in `src/risk/guard.ts`, scheduling in `src/daemon.ts`.
+Risk is controlled in code at four independent levels: every trade, the whole account, every order, and the operator. None of them can be overridden by the AI.
 
-## 1. Position sizing (fixed fraction of equity at risk)
+## 1. Per trade: size from the stop
 
-The position value `N` is chosen so that a stop-out loses `riskPct` of equity, counting the entry fee, the stop-exit fee and slippage.
+Every trade has a stop from the moment it is entered, and the position size is calculated from that stop so a stop-out costs a fixed share of the account, fees and slippage included.
 
 ```
-s    = (entry - stop) / entry                         stop distance
-cost = s + maker + (1 - s) * taker + slippage         loss per unit of position value at the stop
-N    = equity * riskPct / cost
-N    = min(N, 50% of equity)                          cap
-qty  = floor(N / entry) to the market step size
+riskBudget   = equity x riskPct                      (1% by default)
+lossPerUnit  = (entry - stop) + entry x taker fee + stop x taker fee + entry x slippage
+quantity     = min( riskBudget / lossPerUnit , 50% of equity / entry price , free TMN / entry price )
 ```
 
-Defaults: `riskPct` 1%, maker 0.25%, taker 0.3%, slippage 0.1%, cap 50%. Equity is read from the account (TMN plus holdings valued at the bid) just before each decision, so size shrinks after losses and grows after wins.
-
-Worked table, equity 5,000,000 TMN:
-
-| Stop distance | Position value | % of equity | Loss at stop | Cap binds |
-|---|---|---|---|---|
-| 1.00% | 2,500,000 | 50.0% | 41,175 (0.82%) | yes |
-| 1.35% | 2,500,000 | 50.0% | 49,899 (1.00%) | boundary, about 1.354% |
-| 1.50% | 2,330,459 | 46.6% | 50,000 (1.00%) | no |
-| 2.00% | 1,891,074 | 37.8% | 50,000 (1.00%) | no |
-| 2.50% | 1,591,090 | 31.8% | 50,000 (1.00%) | no |
-
-The detector only emits stops between 1.0% and 2.5%. A wider stop means a smaller position, so the loss stays at 1%. When the cap binds the trade is smaller, never riskier.
-
-After a profit lock (section 2) the same formula runs with a smaller `riskPct`:
-
-| Stop distance | Value at 0.5% risk | Value at 0.25% risk |
+| Rule | Value | Effect |
 |---|---|---|
-| 1.0% | 1,517,911 | 758,956 |
-| 2.0% | 945,537 | 472,769 |
-| 2.5% | 795,545 | 397,772 |
+| Risk per trade | 1% of equity at the stop | A losing trade costs about 50,000 TMN on a 5,000,000 account |
+| Position cap | 50% of equity per position | **The bot never enters with all its money** |
+| Open positions | At most 2 (pending entries count) | At most two independent risks at once |
+| Initial stop | Breakout: 4 ATR below the signal close (typically 3% to 6%). Washout: 6% below the signal close | Gives the trade room, defines the size |
+| Trailing stop | Breakout: 8 ATR below the highest price since entry, only moves up | Locks in profit as the trade runs |
+| Take-profit | Washout: resting limit sell 4% above | Banks the rebound at the maker fee |
+| Time stop | Breakout 336 hours, washout 8 hours | No position is held indefinitely |
+| AI | Can only shrink or veto | Size can only go down after the rules |
 
-Rejections: quantity rounds down to the step size. If the value is under the market's `minNotional` or `minQty`, the trade is skipped (`sizing: ...` in `setup.rejected`). The AI may shrink a position (multiplier below 1), never enlarge it. A shrink under the minimum is also rejected.
+Worked example (equity 5,000,000 TMN, entry 41,260, stop 39,550): the loss per unit is 1,994 TMN, so the bot buys 25.07 units worth 1,034,000 TMN (21% of equity). If the stop is hit the account loses about 50,000 TMN, 1.0%.
 
-## 2. Guard limits (`createGuard`, all overridable by env)
+## 2. Account level: the risk guard
 
-| Rule | Default | Env | Effect |
+`src/risk/guard.ts` tracks equity on every cycle and blocks new entries when a limit is reached. Open positions keep their stops.
+
+| Rule | Default | Setting | Effect |
 |---|---|---|---|
-| Risk per trade | 1% | `RISK_PCT` | Base `riskPct` |
-| Profit lock 1 | total PnL at least +15% | `LOCK1_PNL`, `LOCK1_RISK` | Risk drops to 0.5% |
-| Profit lock 2 | total PnL at least +30% | `LOCK2_PNL`, `LOCK2_RISK` | Risk drops to 0.25% |
-| Daily loss halt | equity 12% below the day's peak | `DAILY_LOSS_HALT` | No new entries until the next UTC day. The peak resets to current equity at 00:00 UTC |
-| Hard drawdown kill | equity 30% below start equity | `HARD_DRAWDOWN` | No new entries for the rest of the run. Persisted in the guard state |
-| Loss streak pause | 3 losing trades in a row | `LOSS_STREAK`, `LOSS_PAUSE_MIN` (30) | 30 minute pause. Any non-losing trade resets the count |
-| Entry rate | 6 entries per rolling hour | `MAX_ENTRIES_PER_HOUR` | Further entries blocked until the window frees |
-| Kill file | `STOP` in the repo root | none | Blocks entries while the file exists |
-| Max positions | 2 (open plus pending) | code option `maxPositions` | No third entry |
-| Spread | 1% | code option `maxSpreadPct` | Candidate rejected |
+| Profit lock 1 | Total PnL at least +15% | `risk.lockTiers[0]` | Risk per trade drops to 0.5% |
+| Profit lock 2 | Total PnL at least +30% | `risk.lockTiers[1]` | Risk per trade drops to 0.25% |
+| Daily loss halt | Equity 12% below the day's peak | `risk.dayLossHalt` | No new entries until the next UTC day |
+| Hard drawdown halt | Equity 30% below the start | `risk.hardDrawdown` | No new entries for the rest of the run, persisted across restarts |
+| Kill switch | `STOP` file exists | `risk.killFile` | No new entries until the file is removed |
+| Market gate (strategy) | Fewer than 70% of markets in an uptrend | `strategy.breakout.breadthMin` | No new breakout entries |
+| Crash filter (strategy) | More than half the markets fell over 2% in the last hour | `strategy.washout.crashBreadthMax` | No new washout entries |
 
-Total PnL is measured against the start equity of the run (the TMN balance at start in live mode, `START_TMN` otherwise). On a 5,000,000 TMN start: day halt at 12% below the day's peak (for a 5.0M peak: 4,400,000), hard kill at 3,500,000, profit locks at 5,750,000 and 6,500,000.
+On a 5,000,000 TMN start: day halt 12% below the day's peak, hard halt at 3,500,000, profit locks at 5,750,000 and 6,500,000.
 
-What a block does: it stops **new** entries and cancels pending (unfilled) entry orders. Open positions keep being managed (TPs, stop, time stop). `blockReason` is shown in every `daemon.heartbeat`.
+In the 180-day backtest the largest peak-to-trough drop of the account was 6.15%, and 7.85% on the unseen test window of the strategy tournament: well inside every limit.
 
-The `STOP` file is checked only by the `live` daemon. `backtest`, `shadow` and `dry` build their guard without it.
+## 3. Every order: independent checks
 
-Honest note: with 1% risk and a 3-loss pause, a 12% day halt needs a long series of losses, so the pause and the 1% sizing do most of the work. The halts are the backstop.
+Before any order reaches Wallex:
 
-## 3. Stops and exits
+1. **Allowed markets only.** Buys on markets in `config/blocked-markets.txt` are refused. Holdings are only ever sold through TMN markets.
+2. **Exchange rules.** Quantity rounded down to the step, price to the tick, minimum quantity and value enforced.
+3. **Order sanity check** (live adapter, independent of the strategy): a buy worth more than `risk.maxOrderTmn` (3,000,000 TMN), priced more than 3% above the live ask, or below half the bid is refused and logged as `exchange.order_refused`. Sells are never blocked, so a position can always be closed.
+4. **Free balance.** The strategy never sizes beyond the free TMN balance.
 
-Every position has a stop from the moment it is entered (stop price in the order metadata and in `entry.placed`). The stop is never widened. After TP1 it moves up to `entry * 1.006`. It is watched by the daemon every 5 s and on every closed 1m bar, and executed as a marketable limit sell. A time stop closes a position that is still below entry 240 minutes after the fill. See STRATEGY.md section 7.
+## 4. Stops and exits
 
-Because the stop is not an exchange order, a dead process means an unprotected position. The daemon raises `daemon.degraded` and a console alarm when the API fails for 5 minutes with positions open.
+The stop is enforced by the bot rather than as a resting exchange order, so the bot can apply the trailing logic and sell with the right price on every market:
 
-## 4. End of run
+- every closed 1-minute bar: if the low touched the stop, sell;
+- every 5 seconds in live and shadow modes: if the live bid touched the stop, sell immediately;
+- the exit is a marketable limit sell at the bid, lowered by 0.5% per retry up to 12% until it fills;
+- the trailing stop is recomputed every minute and logged (`stop.trail`) each time it rises.
+
+The daemon alarms (`daemon.degraded`) if the exchange is unreachable for 5 minutes while positions are open, and the Grafana rule "bot down" fires within two minutes if the process stops.
+
+## 5. End of the run and pullout
 
 | Time | What happens |
 |---|---|
-| `RUN_END` minus 45 min (`ENTRY_CUTOFF_MIN`) | Entries disabled, pending entries cancelled |
-| `RUN_END` minus 15 min (`FLATTEN_MIN`) | Strategy stops managing. Pullout runs and repeats every 60 s until nothing sellable is left |
-| `RUN_END` | Daemon exits. Exit code 1 and a console warning if still holding something |
+| `RUN_END` minus 45 min (`ENTRY_CUTOFF_MIN`) | New entries stop; open positions keep their stops and trailing stops |
+| `RUN_END` | Pending buys are cancelled and the daemon exits with a summary |
+| Operator | `bun run pullout --yes` converts every holding to TMN, so the result is realised in TMN as the challenge requires |
 
-`RUN_END` defaults to now plus 24 h when unset (a warning is logged). The challenge requires profit to be realised in TMN, so the plan is to be flat in TMN before the official end. Set `RUN_END` earlier than the official end by at least the flatten window plus a margin.
+Pullout (`src/pullout.ts`): cancels every open order, then sells each holding through its TMN market with a marketable limit at `bid x (1 - slip)`, with slip stepping 0.2%, 0.4%, 0.8%, 1.5%, 3%, 5%, 8%, 12% until filled. A failed cancel is logged and skipped. Without `--yes` it only prints the plan. It was verified on the live account: it sold the test holding on its first step.
 
-## 5. Pullout (`src/pullout.ts`, `bun run pullout --yes`)
+## 6. Why the losses stay small
 
-1. Cancel **every** open order on the account (TPs and entries included).
-2. For each holding, pick the `<ASSET>TMN` market, else `<ASSET>USDT`. No market means it is listed as unroutable.
-3. Sell with a marketable **limit** order at `bid * (1 - slip)` (limit orders work where market orders are disabled). Slip steps: 0.2%, 0.4%, 0.8%, 1.5%, 3%, 5%, 8%, 12%, one step per round.
-4. Wait 2.5 s, cancel its own unfilled sell orders, re-plan, repeat (at most 8 rounds). USDT is sold last, via `USDTTMN`.
-5. Holdings below `minQty` or `minNotional` are reported as dust and cannot be sold.
-
-Without `--yes` the command prints the plan and sends nothing. With `--yes` it exits with code 1 if something sellable remains: run it again.
+- Each trade risks 1%, and the guard halves that after the account is up 15%.
+- The market gate blocks breakouts when most coins are not trending up, which is when breakout strategies lose, and the crash filter blocks washout buys during a market-wide fall.
+- Breakout winners run with a wide trailing stop while losers are cut at the initial stop: in the 180-day backtest of the breakout model alone the average winner was 3.5 times the average loser.
+- Washout trades are short: a 4% take-profit, a 6% stop and an 8-hour time stop.
+- Two positions at most, never more than half the account in one.

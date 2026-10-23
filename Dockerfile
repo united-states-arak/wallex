@@ -4,10 +4,14 @@ ARG BUN_VERSION=1.3.4
 FROM oven/bun:${BUN_VERSION}-slim AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+# --ignore-scripts: no dependency may run an install script at build time (supply-chain hardening)
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 FROM oven/bun:${BUN_VERSION}-slim
 ARG GIT_SHA=dev
+LABEL org.opencontainers.image.title="starcoach-trader" \
+      org.opencontainers.image.description="Algorithmic spot trading daemon for Wallex" \
+      org.opencontainers.image.revision="${GIT_SHA}"
 ENV NODE_ENV=production \
     GIT_SHA=${GIT_SHA} \
     STARCOACH_MODE=paper

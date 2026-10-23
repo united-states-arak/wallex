@@ -13,7 +13,6 @@
 [run]
 end = ""                # ISO end time of the run, e.g. "2026-10-23T18:00:00Z"; empty = now + defaultHours. Env: RUN_END
 entryCutoffMin = 45     # minutes before the end when new entries stop. Env: ENTRY_CUTOFF_MIN
-flattenMin = 15         # minutes before the end when everything is sold to TMN. Env: FLATTEN_MIN
 defaultHours = 24       # run length in hours when `end` is empty
 
 # ---------------------------------------------------------------- Wallex API (key comes from WALLEX_API_KEY only)
@@ -37,7 +36,8 @@ startTmn = 5_000_000    # starting TMN balance for paper, backtest and dry runs.
 
 # ---------------------------------------------------------------- markets
 [market]
-symbols = ["PEPETMN", "PUMPTMN", "DOGETMN"]  # symbols traded when none are given on the command line. Env: SYMBOLS (comma separated)
+# The 15 liquid, allowed TMN markets the breakout strategy was researched and validated on (its breadth gate reads all of them).
+symbols = ["PEPETMN", "PUMPTMN", "USOONTMN", "BNBTMN", "ETHTMN", "XRPTMN", "ARBTMN", "DOGETMN", "ADATMN", "STMN", "SOLTMN", "APETMN", "TRXTMN", "LTCTMN", "AAVETMN"]  # Env: SYMBOLS (comma separated)
 blockedFile = "config/blocked-markets.txt"   # one blocked symbol per line; orders on them are refused
 
 [market.universe]       # automatic symbol selection (`--symbols auto`)
@@ -56,10 +56,9 @@ slippagePct = 0.001     # slippage allowance used in position sizing and net-RR 
 maxPositions = 2        # open positions plus pending entries at the same time
 dayLossHalt = 0.12      # halt entries for the UTC day when equity falls this far below the day peak. Env: DAILY_LOSS_HALT
 hardDrawdown = 0.3      # halt for good when equity falls this far below the start equity. Env: HARD_DRAWDOWN
-lossStreak = 3          # consecutive losing trades that trigger a pause. Env: LOSS_STREAK
-lossPauseMin = 30       # length of that pause in minutes. Env: LOSS_PAUSE_MIN
-maxEntriesPerHour = 6   # new entries allowed per rolling hour. Env: MAX_ENTRIES_PER_HOUR
 killFile = "STOP"       # creating this file stops new entries; relative to the repo root; empty disables the check
+maxOrderTmn = 3_000_000 # last-line order check: a live BUY above this value in TMN is refused by the exchange adapter
+maxPriceDeviation = 0.03 # last-line order check: a live BUY priced more than this above the ask (or far below the bid) is refused
 
 # Profit locks: once total PnL reaches `pnl`, per-trade risk drops to `riskPct`. At most 2 tiers, ascending pnl.
 # Env: LOCK1_PNL, LOCK1_RISK, LOCK2_PNL, LOCK2_RISK
@@ -70,6 +69,39 @@ riskPct = 0.005
 [[risk.lockTiers]]
 pnl = 0.3
 riskPct = 0.0025
+
+# ---------------------------------------------------------------- strategy selection
+[strategy]
+active = "combo"        # strategy when --strategy is not given: combo (breakout + washout), breakout, ict or noop
+
+# ---------------------------------------------------------------- washout model (src/strategy/washout.ts), part of combo
+[strategy.washout]
+signalMinutes = 15      # signal bar length in minutes (closed bars only)
+lookbackMinutes = 60    # the drop is measured over this many minutes
+dropPct = 0.035         # enter when the price fell at least this fraction over the lookback
+takeProfitPct = 0.04    # resting take-profit limit sell this far above the signal close
+stopPct = 0.06          # stop this far below the signal close
+maxHoldMinutes = 480    # time stop: sell after this many minutes in the position
+crashDropPct = 0.02     # a market counts as falling when its lookback return is below minus this
+crashBreadthMax = 0.5   # no entry while more than this share of markets is falling (market-wide crash)
+riskMult = 1            # risk per washout trade as a multiple of risk.riskPct (capped at 2% of equity)
+
+# ---------------------------------------------------------------- breakout strategy (src/strategy/breakout)
+[strategy.breakout]
+lookbackHours = 96      # breakout: the closed 1h bar closes above the highest high of the previous N hours (4 days)
+emaHours = 96           # trend filter: close above a rising EMA of this many 1h bars
+atrHours = 14           # ATR length in 1h bars (stops, trail and chase limit are measured in it)
+stopAtr = 4             # initial stop this many ATR below the entry
+trailAtr = 8            # trailing stop this many ATR below the highest high since entry (only moves up)
+volumeMult = 1.5        # the breakout hour's volume must exceed this multiple of the previous 24h average (0 disables)
+maxChaseAtr = 3         # skip when the close is already more than this many ATR above the breakout level
+breadthMin = 0.7        # market gate: at least this share of the traded markets closes above its own slow EMA
+breadthEmaHours = 168   # slow EMA length for the market gate (7 days of 1h bars)
+maxHoldHours = 336      # time stop: sell after this many hours in a position
+warmupDays = 8          # days of 1m history loaded at start so the hourly indicators are ready from the first hour
+entrySlip = 0.002       # entry is a marketable limit at ask * (1 + this)
+stopExitSlip = 0.005    # first stop-exit limit sits this far below the bid; widens by this each retry
+stopExitSlipMax = 0.12  # the stop-exit limit never goes further below the bid than this
 
 # ---------------------------------------------------------------- ICT strategy execution
 [strategy.ict]

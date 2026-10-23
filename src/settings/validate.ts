@@ -22,6 +22,16 @@ const describe = (r: Range) => {
   return [r.int ? 'an integer' : 'a number', lo, hi].filter(Boolean).join(' ')
 }
 
+// Remote endpoints must use TLS; plain http is accepted for the local machine only (a local model server, a local collector).
+const isSecure = (s: string) => {
+  try {
+    const u = new URL(s)
+    return u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(u.hostname.toLowerCase()))
+  } catch {
+    return false
+  }
+}
+
 const isUrl = (s: string) => {
   try {
     const u = new URL(s)
@@ -71,15 +81,13 @@ export function validateSettings(s: Settings): string[] {
   const { run, wallex, fees, paper, market, risk, strategy, detect: d, ai, pullout, research, data, logging, telemetry, dashboard } = s
 
   num('run.entryCutoffMin', run.entryCutoffMin, { min: 0 })
-  num('run.flattenMin', run.flattenMin, { min: 0 })
   num('run.defaultHours', run.defaultHours, { minEx: 0, max: 24 * 14 })
   if (run.end !== '' && !Number.isFinite(Date.parse(run.end))) add('run.end', `must be empty or an ISO time such as 2026-10-23T18:00:00Z, got ${JSON.stringify(run.end)}`)
   const runMin = run.defaultHours * 60
-  if (run.end === '' && run.flattenMin >= runMin) add('run.flattenMin', `must be less than the run length (${runMin} min = run.defaultHours)`)
   if (run.end === '' && run.entryCutoffMin >= runMin) add('run.entryCutoffMin', `must be less than the run length (${runMin} min = run.defaultHours)`)
-  if (run.entryCutoffMin < run.flattenMin) add('run.entryCutoffMin', `must be >= run.flattenMin (${run.flattenMin}): entries stop before the flatten window starts`)
 
   url('wallex.baseUrl', wallex.baseUrl)
+  if (isUrl(wallex.baseUrl) && !isSecure(wallex.baseUrl)) add('wallex.baseUrl', 'must use https (the API key travels in a header)')
   num('wallex.requestTimeoutMs', wallex.requestTimeoutMs, { minEx: 0, int: true })
   num('wallex.pollMs', wallex.pollMs, { min: 1000, int: true })
   num('wallex.tickMs', wallex.tickMs, { min: 250, int: true })
@@ -125,11 +133,37 @@ export function validateSettings(s: Settings): string[] {
       if (prev && typeof prev.pnl === 'number' && typeof t.pnl === 'number' && t.pnl <= prev.pnl) add(`risk.lockTiers.${i}.pnl`, `must be greater than the previous tier's pnl (${prev.pnl})`)
     })
   }
-  num('risk.lossStreak', risk.lossStreak, { min: 1, int: true })
-  num('risk.lossPauseMin', risk.lossPauseMin, { min: 0 })
-  num('risk.maxEntriesPerHour', risk.maxEntriesPerHour, { min: 1, int: true })
   str('risk.killFile', risk.killFile, true)
+  num('risk.maxOrderTmn', risk.maxOrderTmn, { minEx: 0 })
+  num('risk.maxPriceDeviation', risk.maxPriceDeviation, { minEx: 0, max: 0.5 })
 
+  oneOf('strategy.active', strategy.active, ['combo', 'breakout', 'ict', 'noop'])
+  const wo = strategy.washout
+  num('strategy.washout.signalMinutes', wo.signalMinutes, { min: 1, max: 240, int: true })
+  num('strategy.washout.lookbackMinutes', wo.lookbackMinutes, { min: 1, max: 1440, int: true })
+  num('strategy.washout.dropPct', wo.dropPct, { minEx: 0, max: 0.5 })
+  num('strategy.washout.takeProfitPct', wo.takeProfitPct, { minEx: 0, max: 1 })
+  num('strategy.washout.stopPct', wo.stopPct, { minEx: 0, max: 0.5 })
+  num('strategy.washout.maxHoldMinutes', wo.maxHoldMinutes, { min: 1, max: 24 * 60 * 14, int: true })
+  num('strategy.washout.crashDropPct', wo.crashDropPct, { minEx: 0, max: 0.5 })
+  num('strategy.washout.crashBreadthMax', wo.crashBreadthMax, { min: 0, max: 1 })
+  num('strategy.washout.riskMult', wo.riskMult, { minEx: 0, max: 2 })
+  const bo = strategy.breakout
+  num('strategy.breakout.lookbackHours', bo.lookbackHours, { min: 2, max: 2000, int: true })
+  num('strategy.breakout.emaHours', bo.emaHours, { min: 2, max: 2000, int: true })
+  num('strategy.breakout.atrHours', bo.atrHours, { min: 2, max: 500, int: true })
+  num('strategy.breakout.stopAtr', bo.stopAtr, { minEx: 0, max: 50 })
+  num('strategy.breakout.trailAtr', bo.trailAtr, { minEx: 0, max: 50 })
+  num('strategy.breakout.volumeMult', bo.volumeMult, { min: 0, max: 20 })
+  num('strategy.breakout.maxChaseAtr', bo.maxChaseAtr, { minEx: 0, max: 50 })
+  num('strategy.breakout.breadthMin', bo.breadthMin, { min: 0, max: 1 })
+  num('strategy.breakout.breadthEmaHours', bo.breadthEmaHours, { min: 2, max: 2000, int: true })
+  num('strategy.breakout.maxHoldHours', bo.maxHoldHours, { min: 1, max: 24 * 60 })
+  num('strategy.breakout.warmupDays', bo.warmupDays, { min: 0, max: 30 })
+  num('strategy.breakout.entrySlip', bo.entrySlip, { min: 0, max: 0.02 })
+  num('strategy.breakout.stopExitSlip', bo.stopExitSlip, { min: 0, max: 0.12 })
+  num('strategy.breakout.stopExitSlipMax', bo.stopExitSlipMax, { minEx: 0, max: 0.5 })
+  if (bo.stopExitSlip > bo.stopExitSlipMax) add('strategy.breakout.stopExitSlip', `must be <= strategy.breakout.stopExitSlipMax (${bo.stopExitSlipMax})`)
   const ict = strategy.ict
   num('strategy.ict.maxSpreadPct', ict.maxSpreadPct, { minEx: 0, max: 1 })
   num('strategy.ict.minNetRr', ict.minNetRr, { minEx: 0, max: 20 })
@@ -185,6 +219,7 @@ export function validateSettings(s: Settings): string[] {
 
   oneOf('ai.failMode', ai.failMode, ['approve', 'veto'])
   url('ai.baseUrl', ai.baseUrl, true)
+  if (ai.baseUrl && isUrl(ai.baseUrl) && !isSecure(ai.baseUrl)) add('ai.baseUrl', 'must use https unless it is a model server on this machine')
   str('ai.model', ai.model)
   num('ai.timeoutMs', ai.timeoutMs, { minEx: 0, int: true })
   num('ai.newsTtlMin', ai.newsTtlMin, { minEx: 0 })
@@ -196,11 +231,15 @@ export function validateSettings(s: Settings): string[] {
       if (f.source === undefined) add(`ai.feeds.${i}.source`, 'is missing')
       else str(`ai.feeds.${i}.source`, f.source)
       if (f.url === undefined) add(`ai.feeds.${i}.url`, 'is missing')
-      else url(`ai.feeds.${i}.url`, f.url)
+      else {
+        url(`ai.feeds.${i}.url`, f.url)
+        if (isUrl(f.url) && !isSecure(f.url)) add(`ai.feeds.${i}.url`, 'must use https')
+      }
     })
   }
   url('ai.fearGreedUrl', ai.fearGreedUrl)
   url('ai.trendingUrl', ai.trendingUrl)
+  for (const [k, v] of [['ai.fearGreedUrl', ai.fearGreedUrl], ['ai.trendingUrl', ai.trendingUrl]] as const) if (isUrl(v) && !isSecure(v)) add(k, 'must use https')
   num('ai.maxHeadlines', ai.maxHeadlines, { min: 0, int: true })
   num('ai.contextWindow', ai.contextWindow, { minEx: 0, int: true })
   if (ai.instructionsFile !== '' && !existsSync(ai.instructionsFile)) add('ai.instructionsFile', `file not found: ${ai.instructionsFile}`)
@@ -228,6 +267,7 @@ export function validateSettings(s: Settings): string[] {
   num('telemetry.prometheusPort', telemetry.prometheusPort, { min: 0, max: 65535, int: true })
   str('telemetry.prometheusHost', telemetry.prometheusHost)
   url('telemetry.otlpEndpoint', telemetry.otlpEndpoint, true)
+  if (telemetry.otlpEndpoint && isUrl(telemetry.otlpEndpoint) && !isSecure(telemetry.otlpEndpoint) && !/^http:\/\/[a-z0-9-]+(:\d+)?(\/|$)/i.test(telemetry.otlpEndpoint)) add('telemetry.otlpEndpoint', 'must use https, a localhost URL or a single-label container host name')
   num('telemetry.otlpIntervalMs', telemetry.otlpIntervalMs, { min: 1000, int: true })
   str('dashboard.host', dashboard.host)
   num('dashboard.port', dashboard.port, { min: 0, max: 65535, int: true })

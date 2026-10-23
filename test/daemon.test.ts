@@ -85,9 +85,9 @@ function stub(over: Partial<StatefulStrategy> = {}): Stub {
   return s
 }
 
-const fast = { tickMs: 100, pollMs: 100, verifyMs: 200, pulloutWaitMs: 0, signals: false }
+const fast = { tickMs: 100, pollMs: 100, signals: false }
 
-test('runs, survives an onBar exception, stops entries at the cutoff, flattens to TMN and writes state', async () => {
+test('runs, survives an onBar exception, stops entries at the cutoff, sells nothing by itself and writes state', async () => {
   const c = capture()
   const ex = new PaperExchange(meta, new Set(), { TMN: 5_000_000 })
   const st = stub()
@@ -102,7 +102,6 @@ test('runs, survives an onBar exception, stops entries at the cutoff, flattens t
     log: c.log,
     runEnd,
     entryCutoffMin: 2.4 / 60,
-    flattenMin: 1.4 / 60,
     stateDir: dir,
     makeStrategy: () => st.strategy,
   })
@@ -125,15 +124,17 @@ test('runs, survives an onBar exception, stops entries at the cutoff, flattens t
 
   expect(st.enabled).toEqual([false])
   expect(c.of('daemon.entries_disabled')).toHaveLength(1)
-  expect(c.of('daemon.flatten_phase')).toHaveLength(1)
-  expect(c.of('daemon.flatten').length).toBeGreaterThanOrEqual(1)
+  expect(c.of('daemon.flatten_phase')).toHaveLength(0)
+  expect(c.of('daemon.flatten')).toHaveLength(0)
+  expect(ex.fills.some((f) => f.side === 'SELL')).toBe(false)
 
+  // the bought coin is still held: selling is only done by running pullout by hand
   const bals = await ex.balances()
   expect(ex.fills.some((f) => f.side === 'BUY')).toBe(true)
-  expect(bals.PEPE!.free + bals.PEPE!.locked).toBe(0)
-  expect(bals.TMN!.free).toBeGreaterThan(4_000_000)
+  expect(bals.PEPE!.free + bals.PEPE!.locked).toBeGreaterThan(0)
 
-  expect(res).toMatchObject({ reason: 'run_end', flat: true, positionsLeft: [] })
+  expect(res).toMatchObject({ reason: 'run_end', flat: false, positionsLeft: ['PEPE'] })
+  expect(c.of('daemon.unflat_exit')).toHaveLength(1)
   expect(Date.now()).toBeGreaterThanOrEqual(runEnd)
   expect(c.of('daemon.stop')).toHaveLength(1)
 
@@ -158,7 +159,6 @@ test('buy orders after the cutoff are refused even if the strategy ignores setEn
     log: c.log,
     runEnd: Date.now() + 2_000,
     entryCutoffMin: 5, // already past the cutoff at start
-    flattenMin: 0.01,
     stateDir: dir,
     makeStrategy: () => st.strategy,
   })
@@ -253,7 +253,7 @@ test('state is restored only for the same RUN_END', async () => {
 }, 15_000)
 
 // A different RUN_END normally starts clean, but saved positions or pending entries must survive the restart.
-async function restartWith(savedState: unknown) {
+async function restartWith(savedState: unknown, over: Partial<StatefulStrategy> = {}) {
   const prevEnd = new Date(Date.now() + 3_600_000).toISOString()
   writeFileSync(join(dir, 'paper-run.json'), JSON.stringify({ runEnd: prevEnd, startEquity: 5_000_000, startedAt: prevEnd, sha: 't' }))
   writeFileSync(join(dir, 'paper-strategy.json'), JSON.stringify({ savedAt: prevEnd, state: savedState }))
@@ -262,6 +262,7 @@ async function restartWith(savedState: unknown) {
   const st = stub({
     restoreState: (x: unknown) => void (restored = x),
     getState: () => restored ?? null,
+    ...over,
   })
   const ac = new AbortController()
   const p = runDaemon({
@@ -296,6 +297,15 @@ test('a new RUN_END keeps saved state that still has open positions or pending e
   expect(pend.c.of('daemon.state_kept').length).toBe(1)
 }, 15_000)
 
+test('saved positions the strategy could not restore are reported loudly', async () => {
+  const state = { positions: { PEPETMN: { symbol: 'PEPETMN', qty: 10 } }, pending: {} }
+  const ok = await restartWith(state)
+  expect(ok.c.of('daemon.restore_incomplete')).toHaveLength(0)
+  // for example a state file written by another strategy: the new one restores nothing
+  const lost = await restartWith(state, { restoreState: () => {}, getState: () => ({ positions: {}, pending: {} }) })
+  expect(lost.c.of('daemon.restore_incomplete')[0]!.data).toMatchObject({ saved: ['positions: PEPETMN'], restored: [] })
+}, 15_000)
+
 test('a new RUN_END discards saved state that is flat', async () => {
   const r = await restartWith({ positions: {}, pending: {}, traded: ['PEPETMN'] })
   expect(r.restored).toBeUndefined()
@@ -312,7 +322,6 @@ test('stateExposure lists open positions and pending entries only', () => {
 })
 
 test('guardedExchange counts accepted entries only and refuses entries when disabled', async () => {
-  const entries: number[] = []
   let on = true
   const raw: Exchange = {
     mode: 'paper',
@@ -322,11 +331,10 @@ test('guardedExchange counts accepted entries only and refuses entries when disa
     cancel: async () => {},
     openOrders: async () => [],
   }
-  const ex = guardedExchange(raw, { guard: { recordEntry: (t) => entries.push(t) }, now: () => 42, entriesOn: () => on })
+  const ex = guardedExchange(raw, { entriesOn: () => on })
   await ex.place(buy('ok1'))
   await ex.place(buy('bad1'))
   await ex.place({ ...buy('s1'), side: 'SELL' })
-  expect(entries).toEqual([42])
   on = false
   expect((await ex.place(buy('ok2'))).error).toBe('entries disabled')
   expect((await ex.place({ ...buy('s2'), side: 'SELL' })).status).toBe('NEW')
@@ -335,15 +343,15 @@ test('guardedExchange counts accepted entries only and refuses entries when disa
 test('resolveSchedule reads env, flags override, bad RUN_END throws', () => {
   const now = Date.parse('2026-01-01T00:00:00Z')
   const d = resolveSchedule({}, {}, now)
-  expect(d).toMatchObject({ runEnd: now + 86_400_000, defaulted: true, entryCutoffMin: 45, flattenMin: 15 })
-  const e = resolveSchedule({}, { RUN_END: '2026-01-02T12:00:00Z', ENTRY_CUTOFF_MIN: '30', FLATTEN_MIN: '10' }, now)
-  expect(e).toMatchObject({ runEnd: Date.parse('2026-01-02T12:00:00Z'), defaulted: false, entryCutoffMin: 30, flattenMin: 10 })
-  expect(resolveSchedule({ flattenMin: 5 }, {}, now).flattenMin).toBe(5)
+  expect(d).toMatchObject({ runEnd: now + 86_400_000, defaulted: true, entryCutoffMin: 45 })
+  const e = resolveSchedule({}, { RUN_END: '2026-01-02T12:00:00Z', ENTRY_CUTOFF_MIN: '30' }, now)
+  expect(e).toMatchObject({ runEnd: Date.parse('2026-01-02T12:00:00Z'), defaulted: false, entryCutoffMin: 30 })
+  expect(resolveSchedule({ entryCutoffMin: 5 }, {}, now).entryCutoffMin).toBe(5)
   expect(() => resolveSchedule({}, { RUN_END: 'nope' }, now)).toThrow(/RUN_END/)
 })
 
 test('resolveSchedule follows the run settings, including STARCOACH__ overrides', () => {
   const now = Date.parse('2026-01-01T00:00:00Z')
-  const r = resolveSchedule({}, { STARCOACH__run__defaultHours: '6', STARCOACH__run__flattenMin: '5' }, now)
-  expect(r).toMatchObject({ runEnd: now + 6 * 3_600_000, defaulted: true, flattenMin: 5 })
+  const r = resolveSchedule({}, { STARCOACH__run__defaultHours: '6', STARCOACH__run__entryCutoffMin: '5' }, now)
+  expect(r).toMatchObject({ runEnd: now + 6 * 3_600_000, defaulted: true, entryCutoffMin: 5 })
 })

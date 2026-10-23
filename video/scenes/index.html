@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>StarCoach Trader — دمو</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="veil"></div>
+
+<!-- ۱. معرفی -->
+<section class="scene" id="s01">
+  <div class="s01-wrap">
+    <div class="logo" data-a="up" data-t="0.3" data-dur="0.9"><i data-icon="star"></i><span>StarCoach Trader</span></div>
+    <div class="s01-sub" data-a="up" data-t="@یه موتور" data-dur="0.9">موتور معامله‌گر خودکار با نظارت هوش مصنوعی برای والکس</div>
+    <div class="badges">
+      <div class="pill" data-a="up" data-t="@بازار رو خودش"><i data-icon="candles"></i>اسپات، بازارهای تومنی</div>
+      <div class="pill" data-a="up" data-t="@با مدیریت ریسک"><i data-icon="wallet"></i>۵ میلیون تومن سرمایه</div>
+      <div class="pill" data-a="up" data-t="@برای هر تصمیم"><i data-icon="check"></i>تصمیم، اجرا و ثبت دلیل، کاملاً خودکار</div>
+    </div>
+  </div>
+</section>
+
+<!-- ۲. مسیر یک تصمیم -->
+<section class="scene" id="s02">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">چطور کار می‌کند</div><h1>مسیر یک تصمیم</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="pipe">
+    <div class="card step" data-a="up" data-t="@هر بیست ثانیه|0.3">
+      <div class="icon"><i data-icon="candles"></i></div><div class="n">۱</div>
+      <div class="t">داده‌ی والکس</div><div class="s">کندل یک‌دقیقه‌ای ۱۵ بازار</div>
+    </div>
+    <div class="arrow" data-a="fade" data-t="@اگه سیگنالی">←</div>
+    <div class="card step" data-a="up" data-t="@اگه سیگنالی" >
+      <div class="icon"><i data-icon="zap"></i></div><div class="n">۲</div>
+      <div class="t">سیگنال</div><div class="s">شکست روند یا واش‌اوت</div>
+    </div>
+    <div class="arrow" data-a="fade" data-t="@گارد ریسک">←</div>
+    <div class="card step" data-a="up" data-t="@گارد ریسک">
+      <div class="icon"><i data-icon="shield"></i></div><div class="n">۳</div>
+      <div class="t">مدیریت ریسک</div><div class="s">گارد ریسک و اندازه‌ی معامله</div>
+    </div>
+    <div class="arrow" data-a="fade" data-t="@عامل هوش مصنوعی">←</div>
+    <div class="card step" data-a="up" data-t="@عامل هوش مصنوعی">
+      <div class="icon"><i data-icon="spark"></i></div><div class="n">۴</div>
+      <div class="t">بررسی هوش مصنوعی</div><div class="s">عامل با ابزار، حکم با دلیل</div>
+    </div>
+    <div class="arrow" data-a="fade" data-t="@سفارش ثبت">←</div>
+    <div class="card step" data-a="up" data-t="@سفارش ثبت">
+      <div class="icon"><i data-icon="file"></i></div><div class="n">۵</div>
+      <div class="t">سفارش و لاگ تصمیم</div><div class="s">دلیل هر مرحله ثبت می‌شود</div>
+    </div>
+  </div>
+  <div class="foot">
+    <div class="pill" data-a="up" data-t="0.8"><i data-icon="clock"></i>هر ۲۰ ثانیه یک دور</div>
+    <div class="pill" data-a="up" data-t="@همه‌ی این مراحل|0.2"><i data-icon="file"></i>همه‌ی مراحل با دلیل در لاگ تصمیم</div>
+  </div>
+</section>
+
+<!-- ۳. شکست روند -->
+<section class="scene" id="s03">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">استراتژی اول</div><h1>شکست روند</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="split">
+    <div class="side">
+      <div class="card cond" data-a="right" data-t="@سقف چهار روز"><div class="icon"><i data-icon="up"></i></div>
+        <div><div class="t">بسته‌شدن بالای سقف ۹۶ ساعته</div><div class="s">کندل یک‌ساعته، سقف چهار روز اخیر</div></div></div>
+      <div class="card cond" data-a="right" data-t="@حجم معامله"><div class="icon"><i data-icon="bars"></i></div>
+        <div><div class="t">حجم حداقل ۱٫۵ برابر میانگین</div></div></div>
+      <div class="card cond" data-a="right" data-t="@هفتاد درصد"><div class="icon"><i data-icon="pie"></i></div>
+        <div><div class="t">دست‌کم ۷۰٪ بازار صعودی</div></div></div>
+      <div class="statline" data-a="up" data-t="@سه و نیم برابر">میانگین سود ≈ <b>۳٫۵ برابر</b> میانگین ضرر</div>
+    </div>
+    <div class="card chart"><svg id="bo" viewBox="0 0 1000 640"></svg></div>
+  </div>
+</section>
+
+<!-- ۴. واش‌اوت -->
+<section class="scene" id="s04">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">استراتژی دوم</div><h1>واش‌اوت</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="split">
+    <div class="side">
+      <div class="card cond" data-a="right" data-t="@سه و نیم درصد"><div class="icon"><i data-icon="down"></i></div>
+        <div><div class="t">افت ۳٫۵٪ یا بیشتر در یک ساعت</div><div class="s">وقتی بقیه‌ی بازار آرام است</div></div></div>
+      <div class="card cond" data-a="right" data-t="@چهار درصد بالاتر"><div class="icon"><i data-icon="target"></i></div>
+        <div><div class="t">فروش با ۴٪ سود</div><div class="s">حدضرر ۶٪ پایین‌تر</div></div></div>
+      <div class="card cond" data-a="right" data-t="@هشت ساعت"><div class="icon"><i data-icon="hourglass"></i></div>
+        <div><div class="t">حداکثر ۸ ساعت</div></div></div>
+      <div class="statline" data-a="up" data-t="@ولی بقیه"><b>اگر کل بازار با هم بریزد، خرید نمی‌کند</b></div>
+    </div>
+    <div class="card chart" style="flex-direction:column; gap: 18px;">
+      <svg id="wo" viewBox="0 0 1000 520" style="flex:1"></svg>
+      <div class="muted" style="font-size:29px; line-height:1.5" data-a="up" data-t="@دفتر موقعیت مشترک">
+        <span class="accent" style="font-weight:700">دفتر موقعیت مشترک:</span> شکست روند برای سودهای بزرگ، واش‌اوت برای فعالیت منظم
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ۵. هوش مصنوعی -->
+<section class="scene" id="s05">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">نقش واقعی هوش مصنوعی</div><h1>یک حکم واقعی از مدل</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="split">
+    <div class="side" style="justify-content:center">
+      <div class="sec" data-a="up" data-t="@قبل از هر خرید">قبل از هر خرید، سه حکم ممکن:</div>
+      <div class="opts" data-kids="up" data-t="@تصمیم می" data-stagger="0.25">
+        <div class="opt">تأیید</div><div class="opt">کوچک‌کردن</div><div class="opt">رد</div>
+      </div>
+      <div class="card cond" data-a="right" data-t="@چیزی رو می"><div class="icon"><i data-icon="eye"></i></div>
+        <div><div class="t">چیزی را می‌بیند که نمودار نمی‌بیند</div><div class="s">هک، حذف از صرافی، خبر</div></div></div>
+      <div class="card cond" data-a="right" data-t="@فقط می"><div class="icon"><i data-icon="shield"></i></div>
+        <div><div class="t">فقط ریسک را کم می‌کند، نه زیاد</div></div></div>
+    </div>
+    <div class="card verdict" data-a="left" data-t="@این یه حکم واقعی|-0.3" data-dur="0.9">
+      <div class="v-top"><div class="v-sym">ARBTMN</div><div class="v-badge">تأیید</div></div>
+      <div class="v-label">ابزارهای صدا زده‌شده</div>
+      <div class="v-row"><span class="chip">get_setup</span><span class="accent">←</span><span class="chip">get_news_digest</span><span class="accent">←</span><span class="chip">submit_verdict</span></div>
+      <div class="v-row"><span class="v-label">زمان</span><span style="font-weight:700">۵٫۶ ثانیه</span></div>
+      <div class="v-row"><span class="v-label">دلیل</span></div>
+      <div class="v-reason">«شاخص ترس و طمع ۵۰، هیچ خبر منفی برای <span class="num">ARB</span>، شکست با حجم ۱٫۸ برابر، ۲۰٫۷٪ از سرمایه»</div>
+    </div>
+  </div>
+</section>
+
+<!-- ۶. ریسک -->
+<section class="scene" id="s06">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">محافظت از سرمایه</div><h1>مدیریت ریسک و سرمایه</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="grid4">
+    <div class="card big" data-a="up" data-t="@یک درصد"><div class="v">۱٪</div><div class="t">ریسک هر معامله از کل حساب</div></div>
+    <div class="card big" data-a="up" data-t="@نصف سرمایه"><div class="v">۵۰٪</div><div class="t">حداکثر سرمایه در یک موقعیت</div></div>
+    <div class="card big" data-a="up" data-t="@دو موقعیت"><div class="v">۲</div><div class="t">حداکثر موقعیت هم‌زمان</div></div>
+    <div class="card big" data-a="up" data-t="@افت روزانه"><div class="v" style="font-size:84px; white-space:nowrap">۱۲٪ <small class="muted">/</small> ۳۰٪</div><div class="t">توقف در افت روزانه یا کلی</div></div>
+  </div>
+  <div class="row2">
+    <div class="pill" data-a="up" data-t="@بررسی مستقل"><i data-icon="check"></i>بررسی مستقل هر سفارش قبل از ارسال</div>
+    <div class="pill" data-a="up" data-t="@بررسی مستقل|0.5"><i data-icon="power"></i>کلید توقف فوری</div>
+  </div>
+</section>
+
+<!-- ۷. تورنمنت -->
+<section class="scene" id="s07">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">انتخاب استراتژی</div><h1>تورنمنت روی داده‌ی دیده‌نشده</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="tmeta">
+    <div class="pill" data-a="up" data-t="@چهار عامل"><i data-icon="spark"></i>۴ عامل هوش مصنوعی</div>
+    <div class="pill" data-a="up" data-t="@۱۲۰ روز"><i data-icon="clock"></i>۱۲۰ روز آموزش</div>
+    <div class="pill" data-a="up" data-t="@۶۰ روزی"><i data-icon="eye"></i>۶۰ روز آزمون پنهان</div>
+  </div>
+  <table>
+    <thead data-a="fade" data-t="@۶۰ روزی|0.6"><tr><th style="width:44%">استراتژی</th><th style="width:16%">بازده</th><th>نمودار بازده</th><th style="width:15%">ضریب سود</th></tr></thead>
+    <tbody data-kids="up" data-t="@۶۰ روزی|0.9" data-stagger="0.35">
+      <tr class="win"><td><span class="sname">شکست روند</span><span class="tag">برنده</span><span class="sub">حداکثر افت ۷٫۹٪</span></td><td class="ret"><span class="num">+۲۶٪</span></td><td><div class="bar" style="width:94%"></div></td><td><span class="num">۴٫۶۲</span></td></tr>
+      <tr><td><span class="sname"><span class="num">ICT</span> بهبودیافته</span></td><td class="ret"><span class="num">+۲۴٫۵٪</span></td><td><div class="bar" style="width:89%"></div></td><td><span class="num">۲٫۱۹</span></td></tr>
+      <tr><td><span class="sname">چرخش مومنتوم</span><span class="sub">حداکثر افت ۱۲٫۴٪</span></td><td class="ret"><span class="num">+۲۷٫۵٪</span></td><td><div class="bar" style="width:100%"></div></td><td><span class="num">۲٫۵۸</span></td></tr>
+      <tr><td><span class="sname">بازگشت به میانگین</span></td><td class="ret"><span class="num">+۴٫۸٪</span></td><td><div class="bar" style="width:17%"></div></td><td><span class="num">۱٫۰۸</span></td></tr>
+      <tr><td><span class="sname"><span class="num">ICT</span> اولیه</span></td><td class="ret neg"><span class="num">−۳٫۲٪</span></td><td><div class="bar" style="width:12%; background: var(--loss)"></div></td><td><span class="num">۰٫۸۳</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ۸. نتایج -->
+<section class="scene" id="s08">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">بک‌تست ۱۸۰ روزه، بعد از کارمزد</div><h1>نتایج تست‌ها</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="split" style="gap:40px">
+    <div class="stats">
+      <div class="card stat" data-a="right" data-t="@چهل و یک"><div class="v num">+۴۱٫۴٪</div><div class="t">بازده</div></div>
+      <div class="card stat" data-a="right" data-t="@حداکثر افت"><div class="v">۶٫۱٪</div><div class="t">حداکثر افت</div></div>
+      <div class="card stat" data-a="right" data-t="@۲۵۵ معامله"><div class="v">۲۵۵ معامله</div><div class="t">۵۸٫۸٪ موفق</div></div>
+    </div>
+    <div class="card chart" style="flex:1.6"><svg id="eq" viewBox="0 0 1000 560"></svg></div>
+  </div>
+  <div class="badges3">
+    <div class="pill" data-a="up" data-t="@تست سایه"><i data-icon="eye"></i>تست سایه روی بازار زنده</div>
+    <div class="pill" data-a="up" data-t="@تست سایه|1.0"><i data-icon="play"></i>اجرای خشک</div>
+    <div class="pill" data-a="up" data-t="@سفارش کوچیک"><i data-icon="zap"></i>سفارش واقعی روی حساب چالش، ثبت سفارش در ۱۳۶ میلی‌ثانیه</div>
+  </div>
+</section>
+
+<!-- ۹. فنی -->
+<section class="scene" id="s09">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">نگاه فنی</div><h1>ساختار سبک، قابل اعتماد</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="hub">
+    <svg class="wires" viewBox="0 0 1680 640" preserveAspectRatio="none">
+      <g fill="none" stroke="#2c3b57" stroke-width="3">
+        <path data-a="draw" data-t="@Bun" data-dur="0.6" d="M1080 85 L 840 320"/>
+        <path data-a="draw" data-t="@libfx" data-dur="0.6" d="M1080 320 L 840 320"/>
+        <path data-a="draw" data-t="@API" data-dur="0.6" d="M1080 555 L 840 320"/>
+        <path data-a="draw" data-t="@Prometheus" data-dur="0.6" d="M600 85 L 840 320"/>
+        <path data-a="draw" data-t="@Docker" data-dur="0.6" d="M600 320 L 840 320"/>
+        <path data-a="draw" data-t="@۲۳۶" data-dur="0.6" d="M600 555 L 840 320"/>
+      </g>
+    </svg>
+    <div class="core" data-a="pop" data-t="0.5"><i data-icon="star"></i><div>StarCoach</div></div>
+    <div class="card node" style="right:0; top:10px" data-a="right" data-t="@Bun"><div class="icon"><i data-icon="terminal"></i></div><div class="t">Bun و TypeScript</div></div>
+    <div class="card node" style="right:0; top:245px" data-a="right" data-t="@libfx"><div class="icon"><i data-icon="spark"></i></div><div class="t">libfx: هارنس سبک ایجنت</div></div>
+    <div class="card node" style="right:0; top:480px" data-a="right" data-t="@API"><div class="icon"><i data-icon="plug"></i></div><div class="t">Wallex REST و MCP</div></div>
+    <div class="card node" style="left:0; top:10px" data-a="left" data-t="@Prometheus"><div class="icon"><i data-icon="activity"></i></div><div class="t">Prometheus و Grafana با ۱۰ هشدار</div></div>
+    <div class="card node" style="left:0; top:245px" data-a="left" data-t="@Docker"><div class="icon"><i data-icon="box"></i></div><div class="t">Docker امن، بدون دسترسی روت</div></div>
+    <div class="card node" style="left:0; top:480px" data-a="left" data-t="@۲۳۶"><div class="icon"><i data-icon="check"></i></div><div class="t">۲۳۶ تست خودکار</div></div>
+  </div>
+</section>
+
+<!-- ۱۰. آینده -->
+<section class="scene" id="s10">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">پیش‌بینی و آینده</div><h1>انتظار برای سه روز چالش</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="grid3">
+    <div class="card big" data-a="up" data-t="@چهار معامله"><div class="v">حدود ۴</div><div class="t">معامله</div></div>
+    <div class="card big" data-a="up" data-t="@هشت درصد"><div class="v">زیر ۸٪</div><div class="t">افت حساب</div></div>
+    <div class="card big" data-a="up" data-t="@یک درصد"><div class="v">حدود ۱٪</div><div class="t">بازده میانگین در هر سه روز</div></div>
+  </div>
+  <div style="margin-top:56px">
+    <div class="sec" data-a="up" data-t="@قدم">مسیر بعدی</div>
+    <div class="next">
+      <div data-a="right" data-t="@ICT"><span class="dot"></span><span>اضافه‌کردن مدل <span class="num">ICT</span> بهبودیافته</span></div>
+      <div data-a="right" data-t="@بازارهای بیشتر"><span class="dot"></span><span>بازارهای بیشتر با شبیه‌سازی دقیق‌تر اسپرد</span></div>
+      <div data-a="right" data-t="@نقش بزرگ"><span class="dot"></span><span>نقش بیشتر هوش مصنوعی در تشخیص وضعیت بازار</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ۱۱. پایان -->
+<section class="scene" id="s11">
+  <div class="head">
+    <div data-a="up" data-t="0.2"><div class="kicker">پایان</div><h1>همه‌چیز قابل اجرای دوباره است</h1></div>
+    <div class="brand"><i data-icon="star"></i>StarCoach Trader<span class="count"></span></div>
+  </div>
+  <div class="end">
+    <div class="statline" style="align-self:flex-start" data-a="up" data-t="0.6"><b>آخر کار همه‌ی دارایی‌ها به تومن تبدیل می‌شه</b></div>
+    <div class="card term" data-a="up" data-t="@یه دستور"><span class="p">$</span>bun run backtest</div>
+    <div class="link" data-a="up" data-t="@گیت"><span class="muted">مستندات کامل:</span><code>github.com/united-states-arak/wallex</code></div>
+    <div class="thanks" data-a="up" data-t="@ممنون">ممنون که دیدین.</div>
+  </div>
+</section>
+
+<script src="narration.js"></script>
+<script src="equity-data.js"></script>
+<script src="scenes.js"></script>
+<script src="anim.js"></script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import { createSupervisor } from '../src/ai/supervisor'
 import { createMockSupervisor } from '../src/ai/mock'
 import type { NewsSource } from '../src/ai/news'
 import type { NewsDigest, ReviewInput, Supervisor } from '../src/ai/types'
+import type { SetupCandidate } from '../src/ict/types'
 
 type Step = { calls: { name: string; args: unknown }[] } | { text: string } | { status: number } | { hang: true }
 
@@ -72,8 +73,7 @@ function make(env: Record<string, string> = {}, log?: (e: string, d?: Record<str
 }
 
 const entry = 0.00001
-const input: ReviewInput = {
-  setup: {
+const ictSetup: SetupCandidate = {
     model: 'sweep',
     symbol: 'PEPETMN',
     detectedAt: 1_700_000_000,
@@ -89,7 +89,9 @@ const input: ReviewInput = {
     expiresAt: 1_700_003_600,
     invalidateBelow: entry * 0.985,
     rationale: 'Sweep of equal lows then displacement and FVG retrace.',
-  },
+}
+const input: ReviewInput = {
+  setup: ictSetup,
   equityTmn: 5_000_000,
   proposedNotionalTmn: 1_900_000,
   proposedPctOfEquity: 0.38,

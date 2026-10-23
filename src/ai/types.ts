@@ -1,4 +1,18 @@
-import type { SetupCandidate } from '../ict/types'
+// A trade the deterministic strategy wants to open. Every strategy fills the common fields; strategy-specific evidence goes
+// in `features` (breakout) or the ICT fields (sweep, mss, fvg), so one supervisor reviews any strategy.
+export interface TradeCandidate {
+  symbol: string
+  model: string
+  entry: number
+  stop: number
+  tp1?: number
+  score?: number
+  rationale: string
+  features?: Record<string, unknown>
+  sweep?: { kind: string; level: number; extreme: number; [k: string]: unknown }
+  mss?: { level: number; displacementAtr: number; [k: string]: unknown }
+  fvg?: { low: number; high: number; [k: string]: unknown }
+}
 
 export interface NewsItem {
   title: string
@@ -15,7 +29,7 @@ export interface NewsDigest {
 }
 
 export interface ReviewInput {
-  setup: SetupCandidate
+  setup: TradeCandidate
   equityTmn: number
   proposedNotionalTmn: number
   proposedPctOfEquity: number

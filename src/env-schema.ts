@@ -28,6 +28,8 @@ export const envShape = {
   // Secrets: environment only, never read from config files.
   WALLEX_API_KEY: text(z.string().min(1)).optional(),
   AI_API_KEY: text(z.string().min(1)).optional(),
+  // Shared secret for the dashboard's kill-switch button. At least 16 characters. Required when the dashboard is bound off localhost.
+  DASHBOARD_TOKEN: text(z.string().min(16, 'must be at least 16 characters')).optional(),
 
   // Legacy names for settings (see LEGACY_ALIASES).
   WALLEX_BASE_URL: url.optional(),
@@ -45,13 +47,9 @@ export const envShape = {
   LOCK2_RISK: num.optional(),
   DAILY_LOSS_HALT: num.optional(),
   HARD_DRAWDOWN: num.optional(),
-  LOSS_STREAK: int.optional(),
-  LOSS_PAUSE_MIN: num.optional(),
-  MAX_ENTRIES_PER_HOUR: int.optional(),
 
   RUN_END: isoTime.optional(),
   ENTRY_CUTOFF_MIN: num.optional(),
-  FLATTEN_MIN: num.optional(),
 
   AI_BASE_URL: url.optional(),
   AI_MODEL: text(z.string().min(1)).optional(),

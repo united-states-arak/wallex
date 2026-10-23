@@ -162,7 +162,7 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: "RUN_END is under 20 minutes away and positions are still open. Check the flatten phase or run pullout."
+          summary: "RUN_END is under 20 minutes away and positions are still open. The daemon will not sell by itself: run pullout --yes by hand if you want them sold."
         labels:
           severity: critical
           app: starcoach

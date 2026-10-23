@@ -254,7 +254,7 @@ describe('settings wiring', () => {
   const boot2 = (settings: Settings, extra: Parameters<typeof startDashboard>[0] = {}) => {
     const root = mkdtempSync(join(tmpdir(), 'dash-root-'))
     dirs.push(root)
-    const d = startDashboard({ port: 0, root, refreshMs: 0, settings, ...extra })
+    const d = startDashboard({ port: 0, root, refreshMs: 0, settings, token: '', ...extra })
     open.push(d)
     return { d, root }
   }
@@ -334,7 +334,7 @@ describe('server', () => {
     const root = mkdtempSync(join(tmpdir(), 'dash-root-'))
     dirs.push(root)
     mkdirSync(join(root, 'logs'))
-    const d = startDashboard({ port: 0, root, refreshMs: 0, ...o })
+    const d = startDashboard({ port: 0, root, refreshMs: 0, token: '', ...o })
     open.push(d)
     return { d, root }
   }

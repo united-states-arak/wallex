@@ -22,10 +22,9 @@ export interface PulloutReport {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// Holdings are only ever sold through their TMN market: the challenge allows TMN markets only and requires the result in TMN.
 export function routeFor(asset: string, meta: Markets): string | null {
-  if (meta[`${asset}TMN`]) return `${asset}TMN`
-  if (meta[`${asset}USDT`]) return `${asset}USDT`
-  return null
+  return meta[`${asset}TMN`] ? `${asset}TMN` : null
 }
 
 export async function planPullout(ex: Exchange, meta: Markets) {
@@ -45,9 +44,8 @@ export async function planPullout(ex: Exchange, meta: Markets) {
     const m = meta[symbol]!
     const { bid } = await ex.quote(symbol)
     const sellQty = floorTo(qty, m.qtyDecimals)
-    const h: Holding = { asset, symbol, qty: sellQty, bid, value: sellQty * bid }
-    if (sellQty < m.minQty || h.value < m.minNotional) dust.push(h)
-    else sells.push(h)
+    if (sellQty < m.minQty || sellQty * bid < m.minNotional) dust.push({ asset, symbol, qty, bid, value: qty * bid })
+    else sells.push({ asset, symbol, qty: sellQty, bid, value: sellQty * bid })
   }
   sells.sort((a, b) => Number(a.asset === 'USDT') - Number(b.asset === 'USDT'))
   return { sells, dust, unroutable, tmn: (bals.TMN?.free ?? 0) + (bals.TMN?.locked ?? 0) }
@@ -69,10 +67,17 @@ export async function pullout(
     return { executed: false, ...plan, remaining: [] }
   }
 
-  for (const o of await ex.openOrders()) {
-    await ex.cancel(o.clientId)
-    log('pullout.cancel', { clientId: o.clientId, symbol: o.symbol })
+  // One failed cancel (for example an order that filled a moment ago) must not stop the rest of the pullout.
+  const cancel = async (clientId: string, symbol: string) => {
+    try {
+      await ex.cancel(clientId)
+      log('pullout.cancel', { clientId, symbol })
+    } catch (e) {
+      log('pullout.cancel_failed', { clientId, symbol, error: String(e) })
+    }
   }
+
+  for (const o of await ex.openOrders()) await cancel(o.clientId, o.symbol)
 
   const attempts = new Map<string, number>()
   let seq = 0
@@ -85,7 +90,7 @@ export async function pullout(
       attempts.set(h.asset, tries + 1)
       const slip = SLIPPAGE_STEPS[Math.min(tries, SLIPPAGE_STEPS.length - 1)]!
       const price = floorTo(h.bid * (1 - slip), m.priceDecimals)
-      const clientId = `po-${runId}-${seq++}`
+      const clientId = `po_${runId}_${seq++}`
       const ack = await ex.place({
         clientId,
         symbol: h.symbol,
@@ -99,9 +104,8 @@ export async function pullout(
     }
     if (waitMs > 0) await sleep(waitMs)
     for (const o of await ex.openOrders()) {
-      if (!o.clientId.startsWith(`po-${runId}-`)) continue
-      await ex.cancel(o.clientId)
-      log('pullout.cancel', { clientId: o.clientId, symbol: o.symbol })
+      if (!o.clientId.startsWith(`po_${runId}_`)) continue
+      await cancel(o.clientId, o.symbol)
     }
   }
 

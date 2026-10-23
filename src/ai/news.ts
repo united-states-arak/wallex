@@ -1,3 +1,4 @@
+import { readCapped } from '../security/http'
 import { getSettings } from '../settings'
 import type { NewsDigest, NewsItem } from './types'
 
@@ -17,6 +18,17 @@ export interface NewsOptions {
 
 const FAILURE_TTL_MS = 60_000
 const MAX_TITLE = 160
+const MAX_BODY_BYTES = 1_000_000 // an RSS feed or JSON payload larger than this is refused
+
+// Headlines are untrusted text that ends up in a model prompt: drop control characters and markup, keep it one short line.
+export function sanitizeUntrusted(s: string, max = MAX_TITLE): string {
+  return s
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+    .replace(/[<>`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max)
+}
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 
@@ -46,7 +58,7 @@ export function parseRss(xml: string, source: string): NewsItem[] {
     const t = Date.parse(when)
     const atomLink = block.match(/<link[^>]*href="([^"]+)"/i)?.[1]
     out.push({
-      title: title.slice(0, MAX_TITLE),
+      title: sanitizeUntrusted(title),
       source,
       publishedAt: Number.isFinite(t) ? new Date(t).toISOString() : '',
       url: tagText(block, 'link') || (atomLink ? decodeXml(atomLink) : ''),
@@ -76,7 +88,7 @@ export function createNewsSource(opts: NewsOptions = {}): NewsSource {
   }
 
   const fearGreed = async (): Promise<NewsDigest['fearGreed']> => {
-    const body = (await (await request(FNG_URL)).json()) as { data?: { value?: string; value_classification?: string }[] }
+    const body = JSON.parse(await readCapped(await request(FNG_URL), MAX_BODY_BYTES)) as { data?: { value?: string; value_classification?: string }[] }
     const d = body.data?.[0]
     const value = Number(d?.value)
     if (!d || !Number.isFinite(value)) throw new Error('bad fear and greed payload')
@@ -84,12 +96,12 @@ export function createNewsSource(opts: NewsOptions = {}): NewsSource {
   }
 
   const trending = async (): Promise<string[]> => {
-    const body = (await (await request(TRENDING_URL)).json()) as { coins?: { item?: { symbol?: string } }[] }
+    const body = JSON.parse(await readCapped(await request(TRENDING_URL), MAX_BODY_BYTES)) as { coins?: { item?: { symbol?: string } }[] }
     if (!Array.isArray(body.coins)) throw new Error('bad trending payload')
     return body.coins.map((c) => c.item?.symbol?.toUpperCase()).filter((s): s is string => !!s).slice(0, 10)
   }
 
-  const feed = async (f: { source: string; url: string }): Promise<NewsItem[]> => parseRss(await (await request(f.url)).text(), f.source)
+  const feed = async (f: { source: string; url: string }): Promise<NewsItem[]> => parseRss(await readCapped(await request(f.url), MAX_BODY_BYTES), f.source)
 
   const build = async (): Promise<NewsDigest | null> => {
     const [fg, tr, ...rss] = await Promise.allSettled([fearGreed(), trending(), ...feeds.map(feed)])

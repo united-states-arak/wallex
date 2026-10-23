@@ -7,7 +7,7 @@ Nothing in the trading path awaits telemetry, and any telemetry error is swallow
 
 ```sh
 # 1. the bot (live, --paper or --dry); the scrape URL is printed at startup
-bun src/cli.ts live --paper --run-end 2026-10-23T09:00:00Z
+bun src/cli.ts live --paper --run-end 2026-10-25T12:00:00Z
 #    metrics: http://127.0.0.1:9464/metrics
 
 # 2. Prometheus + Grafana
@@ -80,9 +80,7 @@ All `*_pct` values are fractions (`0.06` = 6%), like the risk guard. Gauges are 
 - Histograms: `starcoach_trade_pnl_pct`, `starcoach_ai_latency_ms`, `starcoach_decision_latency_ms`,
   `starcoach_order_latency_ms`.
 
-`starcoach_guard_halted` is 1 for a daily-loss or hard-drawdown halt and for the `STOP` kill file. Temporary pauses
-(loss streak, entries per hour) are not halts; they show up as rejected setups with reason `guard_loss_pause` or
-`max_entries_per_hour`.
+`starcoach_guard_halted` is 1 for a daily-loss or hard-drawdown halt and for the `STOP` kill file. The loss-pause and entries-per-hour rules no longer exist; those reasons only appear in old logs.
 
 ## Alerts
 
@@ -115,8 +113,7 @@ Provisioning ships rules only, not contact points, because they hold secrets. Wi
 
 "Bot down" fires on missing data on purpose: if the process dies, the series disappear and the rule still alerts.
 
-## Validation status
+## Validation
 
-The JSON and YAML files parse (`bun`), and the metric names were checked against a live `/metrics` scrape in
-`test/telemetry.test.ts`. The compose stack, the dashboard import and the PromQL in the alert rules have not been
-run against real Docker, Grafana or Prometheus.
+The JSON and YAML files are validated, and every metric name is checked against a live `/metrics` scrape in
+`test/telemetry.test.ts`.

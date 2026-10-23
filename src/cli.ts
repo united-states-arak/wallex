@@ -50,7 +50,7 @@ const args = parseArgs(rest)
 let symbols = typeof args.symbols === 'string' && args.symbols !== 'auto' ? args.symbols.split(',') : cfg.symbols
 // `--symbols auto` always uses the universe; without --symbols, market.universe.auto decides. Explicit symbols win.
 const useUniverse = args.symbols === 'auto' || (args.symbols === undefined && S.market.universe.auto)
-const strategyName = (fallback: string) => String(args.strategy ?? fallback)
+const strategyName = (fallback: string = S.strategy.active) => String(args.strategy ?? fallback)
 const aiOn = (fallback: boolean) => (args.ai === undefined ? fallback : String(args.ai) === 'on')
 
 const api = new WallexRest()
@@ -60,8 +60,16 @@ async function makeSupervisor(on: boolean, log: Log) {
   return (await import('./ai/mock')).createMockSupervisor()
 }
 
-// ICT needs a guard and a supervisor. Other strategies come from the plain registry.
+// combo, breakout and ict need a guard and a supervisor. Other strategies come from the plain registry.
 async function prepareStrategy(name: string, o: { ai: boolean; meta: Markets; log: Log }) {
+  if (name === 'breakout' || name === 'combo') {
+    const { createBreakoutStrategy, createComboStrategy } = await import('./strategy')
+    const supervisor = await makeSupervisor(o.ai, o.log)
+    const guard = createGuard({ startEquity: cfg.startTmn, limits: { killFile: '' } })
+    const make = name === 'combo' ? createComboStrategy : createBreakoutStrategy
+    const strategy = withGuardFeed(make({ guard, supervisor, log: o.log, meta: o.meta }) as StatefulStrategy, guard, o.meta)
+    return { strategy: strategy as Strategy, close: async () => supervisor.close?.() }
+  }
   if (name !== 'ict') {
     const plain = strategies[name]
     if (!plain) throw new Error(`unknown strategy ${name}`)
@@ -101,7 +109,10 @@ async function main() {
         bars[s] = await loadCandles(api, s, fromSec, toSec)
         console.log(`${s}: ${bars[s]!.length} bars`)
       }
-      const prepared = await prepareStrategy(strategyName('ict'), { ai: aiOn(false), meta, log })
+      const prepared = await prepareStrategy(strategyName(), { ai: aiOn(false), meta, log })
+      // Slow-timeframe strategies get the days before the window as history, so the backtest has no dead warm-up period.
+      const primeDays = prepared.strategy.prime ? (prepared.strategy.primeDays ?? 0) : 0
+      if (primeDays > 0) for (const s of symbols) prepared.strategy.prime!(s, await loadCandles(api, s, fromSec - Math.round(primeDays * 86_400), fromSec))
       const summary = await runBacktest({ bars, meta, blocked: loadBlocked(), strategy: prepared.strategy, log })
       await prepared.close()
       console.log(summary)
@@ -114,7 +125,7 @@ async function main() {
       const log = openLog('shadow')
       const ex = new PaperExchange(meta, loadBlocked())
       const minutes = Number(args.minutes ?? S.run.defaultHours * 60)
-      const { strategy, close } = await prepareStrategy(strategyName('ict'), { ai: aiOn(true), meta, log })
+      const { strategy, close } = await prepareStrategy(strategyName(), { ai: aiOn(true), meta, log })
       console.log(`shadow: ${symbols.join(',')} for ${minutes} min, strategy ${strategy.name}, config ${configHash.slice(0, 12)}, log ${log.path}`)
       await runPoll({
         rest: api, symbols, strategy, ex, paper: ex, log,
@@ -130,14 +141,14 @@ async function main() {
       const meta = await api.markets()
       const log = openLog('dry')
       const ex = new DryExchange(api, meta, loadBlocked(), log)
-      const { strategy, close } = await prepareStrategy(strategyName('ict'), { ai: aiOn(true), meta, log })
+      const { strategy, close } = await prepareStrategy(strategyName(), { ai: aiOn(true), meta, log })
       console.log(`dry run: exchange calls are validated and logged, never sent. log ${log.path}`)
       const probeSymbol = symbols[0]!
       const q = await api.depth(probeSymbol)
       const m = meta[probeSymbol]!
       const price = q.bid * 0.5
       const quantity = Math.ceil((m.minNotional * 1.2) / price)
-      const ack = await ex.place({ clientId: `probe-${Date.now().toString(36)}`, symbol: probeSymbol, side: 'BUY', type: 'LIMIT', price, quantity, reason: 'dry-run wiring probe' })
+      const ack = await ex.place({ clientId: `probe_${Date.now().toString(36)}`, symbol: probeSymbol, side: 'BUY', type: 'LIMIT', price, quantity, reason: 'dry-run wiring probe' })
       console.log('probe:', ack)
       await runPoll({
         rest: api, symbols, strategy, ex, log,
@@ -158,7 +169,6 @@ async function main() {
       const sched = resolveSchedule({
         runEnd: args['run-end'] ? Date.parse(String(args['run-end'])) : undefined,
         entryCutoffMin: args['entry-cutoff-min'] ? Number(args['entry-cutoff-min']) : undefined,
-        flattenMin: args['flatten-min'] ? Number(args['flatten-min']) : undefined,
       })
       if (!Number.isFinite(sched.runEnd)) throw new Error('--run-end is not a valid ISO time')
       const tele = attachTelemetry(rawLog, { mode, sha: gitSha, symbols, runEndSec: Math.floor(sched.runEnd / 1000), startEquity: cfg.startTmn, disabled: Boolean(args['no-metrics']) })
@@ -175,9 +185,11 @@ async function main() {
         },
         { path: log.path },
       )
-      const name = strategyName('ict')
-      const sup = name === 'ict' ? await makeSupervisor(aiOn(true), echo) : null
+      const name = strategyName()
+      const sup = name === 'ict' || name === 'breakout' || name === 'combo' ? await makeSupervisor(aiOn(true), echo) : null
       const ict = name === 'ict' ? (await import('./strategy')).createIctStrategy : null
+      const mod = await import('./strategy')
+      const breakout = name === 'breakout' ? mod.createBreakoutStrategy : name === 'combo' ? mod.createComboStrategy : null
       console.log(`live (${mode}): ${symbols.join(',')} strategy ${name} until ${new Date(sched.runEnd).toISOString()}, config ${configHash.slice(0, 12)}${S.risk.killFile ? `, kill file ${S.risk.killFile}` : ''}, log ${log.path}`)
       const result = await runDaemon({
         rest: api,
@@ -187,8 +199,8 @@ async function main() {
         log: echo,
         runEnd: sched.runEnd,
         entryCutoffMin: sched.entryCutoffMin,
-        flattenMin: sched.flattenMin,
         makeStrategy: ({ guard }) => {
+          if (breakout) return breakout({ guard, supervisor: sup!, log: echo, meta }) as StatefulStrategy
           if (ict) return ict({ guard, supervisor: sup!, log: echo, meta }) as StatefulStrategy
           const plain = strategies[name]
           if (!plain) throw new Error(`unknown strategy ${name}`)
@@ -198,7 +210,9 @@ async function main() {
       await sup?.close?.()
       await tele.close()
       console.log(result)
-      process.exit(result.flat ? 0 : 1)
+      // Reaching RUN_END with coins still held is a normal end (they are converted with `pullout --yes`), so it exits 0 and
+      // Docker does not restart a finished run. A non-flat exit after a signal (crash, stop) is reported as 1.
+      process.exit(result.flat || result.reason === 'run_end' ? 0 : 1)
     }
 
     case 'pullout': {
@@ -217,14 +231,14 @@ async function main() {
         if (report.remaining.length) console.log('STILL HELD (run again):\n' + report.remaining.map(fmt).join('\n'))
       }
       if (report.dust.length) console.log('dust below min order, cannot sell:\n' + report.dust.map(fmt).join('\n'))
-      if (report.unroutable.length) console.log('no TMN or USDT market for: ' + report.unroutable.join(', '))
+      if (report.unroutable.length) console.log('no TMN market for: ' + report.unroutable.join(', '))
       console.log(`log: ${log.path}`)
       if (report.executed && report.remaining.length) process.exit(1)
       return
     }
 
     default:
-      console.log('usage: bun src/cli.ts <check|backtest|shadow|dry|live|pullout> [--symbols A,B] [--days N] [--minutes N] [--once] [--yes] [--strategy ict|noop (default ict)] [--ai on|off] [--paper|--dry|--confirm-live] [--run-end ISO] [--no-metrics]')
+      console.log('usage: bun src/cli.ts <check|backtest|shadow|dry|live|pullout> [--symbols A,B] [--days N] [--minutes N] [--once] [--yes] [--strategy combo|breakout|ict|noop (default strategy.active, combo)] [--ai on|off] [--paper|--dry|--confirm-live] [--run-end ISO] [--no-metrics]')
   }
 }
 

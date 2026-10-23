@@ -85,21 +85,13 @@ test('invalid equity values are ignored', () => {
   expect(g.state().equity).toBe(START)
 })
 
-test('three losses in a row pause entries for 30 minutes, then they resume', () => {
+test('losses in a row are counted but never pause entries', () => {
   const g = make()
   const t = DAY0 + 4000
-  g.recordTrade(-0.01, t)
-  g.recordTrade(-0.01, t + 10)
-  expect(g.blockReason(t + 20)).toBeNull()
-  g.recordTrade(-0.01, t + 30)
-  expect(g.state().consecutiveLosses).toBe(3)
-  expect(g.blockReason(t + 31)).toContain('loss pause')
-  expect(g.blockReason(t + 30 + 1799)).toContain('loss pause')
-  expect(g.blockReason(t + 30 + 1800)).toBeNull()
-  // another loss after the pause pauses again, a win resets the streak
-  g.recordTrade(-0.01, t + 2000)
-  expect(g.blockReason(t + 2001)).toContain('loss pause')
-  g.recordTrade(0.02, t + 2002)
+  for (let i = 0; i < 6; i++) g.recordTrade(-0.001, t + i)
+  expect(g.state().consecutiveLosses).toBe(6)
+  expect(g.blockReason(t + 10)).toBeNull()
+  g.recordTrade(0.02, t + 20)
   expect(g.state().consecutiveLosses).toBe(0)
 })
 
@@ -110,19 +102,6 @@ test('a win between losses resets the streak', () => {
   g.recordTrade(0.01, DAY0 + 4002)
   g.recordTrade(-0.01, DAY0 + 4003)
   expect(g.blockReason(DAY0 + 4004)).toBeNull()
-})
-
-test('at most 6 entries per hour', () => {
-  const g = make()
-  const t = DAY0 + 4000
-  for (let i = 0; i < 6; i++) {
-    expect(g.blockReason(t + i * 60)).toBeNull()
-    g.recordEntry(t + i * 60)
-  }
-  expect(g.blockReason(t + 400)).toContain('max entries per hour')
-  expect(g.blockReason(t + 3599)).toContain('max entries per hour')
-  // the first entry leaves the window after one hour
-  expect(g.blockReason(t + 3601)).toBeNull()
 })
 
 test('the kill file path comes from risk.killFile (STARCOACH__risk__killFile), relative to the repo root', () => {
@@ -147,10 +126,9 @@ test('kill switch file blocks entries while it exists', () => {
 })
 
 test('limits are overridable', () => {
-  const g = make({ limits: { killFile: '', riskPct: 0.02, maxEntriesPerHour: 1 } })
+  const g = make({ limits: { killFile: '', riskPct: 0.02 } })
   expect(g.riskPct()).toBe(0.02)
-  g.recordEntry(DAY0 + 4000)
-  expect(g.blockReason(DAY0 + 4001)).toContain('max entries per hour')
+  expect(g.blockReason(DAY0 + 4001)).toBeNull()
 })
 
 test('state persists to disk and a new guard with the same start equity restores it', () => {
@@ -160,14 +138,22 @@ test('state persists to disk and a new guard with the same start equity restores
   a.recordTrade(-0.01, DAY0 + 4001)
   a.recordTrade(-0.01, DAY0 + 4002)
   a.recordTrade(-0.01, DAY0 + 4003)
-  a.recordEntry(DAY0 + 4004)
   expect(existsSync(statePath)).toBe(true)
   expect(JSON.parse(readFileSync(statePath, 'utf8')).startEquity).toBe(START)
 
   const b = make({ statePath })
   expect(b.state()).toEqual(a.state())
   expect(b.riskPct()).toBe(0.005)
-  expect(b.blockReason(DAY0 + 4010)).toContain('loss pause')
+  expect(b.blockReason(DAY0 + 4010)).toBeNull()
+})
+
+test('a state file from before the pause and entry-rate rules were removed still loads', () => {
+  const statePath = join(dir, 'old-guard.json')
+  writeFileSync(statePath, JSON.stringify({ startEquity: START, equity: START * 0.9, day: Math.floor(DAY0 / 86400), dayStart: START, dayPeak: START, dailyHaltDay: null, hardHalt: null, consecutiveLosses: 3, pausedUntil: DAY0 + 99999, entries: [DAY0], lastNow: DAY0 }))
+  const g = make({ statePath })
+  expect(g.state().equity).toBe(START * 0.9)
+  expect(g.state().consecutiveLosses).toBe(3)
+  expect(g.blockReason(DAY0 + 4000)).toBeNull()
 })
 
 test('persisted hard halt survives a restart', () => {

@@ -1,5 +1,7 @@
 # ICT Strategy Specification for an AI Trading Agent
 
+> **Historical document.** This is the original design brief for the alternative ICT model. What the code implements is in [docs/ICT_MODEL.md](docs/ICT_MODEL.md) (`--strategy ict`). The bot's default strategy is `combo` (trend breakout + washout bounce), described in [docs/STRATEGY.md](docs/STRATEGY.md) and selected in [docs/RESEARCH.md](docs/RESEARCH.md).
+
 **Target venue:** Wallex (crypto exchange)
 **Document scope:** Phase 1 — the strategy itself, defined precisely enough to be coded later. Phase 2 (implementation: data feeds, order execution, backtesting harness) comes after this document is reviewed and approved.
 **Audience:** An AI agent (and the humans supervising it).

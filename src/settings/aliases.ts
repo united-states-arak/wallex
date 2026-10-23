@@ -26,13 +26,9 @@ export const LEGACY_ALIASES: LegacyAlias[] = [
   { env: 'LOCK2_RISK', path: 'risk.lockTiers.1.riskPct' },
   { env: 'DAILY_LOSS_HALT', path: 'risk.dayLossHalt' },
   { env: 'HARD_DRAWDOWN', path: 'risk.hardDrawdown' },
-  { env: 'LOSS_STREAK', path: 'risk.lossStreak' },
-  { env: 'LOSS_PAUSE_MIN', path: 'risk.lossPauseMin' },
-  { env: 'MAX_ENTRIES_PER_HOUR', path: 'risk.maxEntriesPerHour' },
 
   { env: 'RUN_END', path: 'run.end', parse: trim },
   { env: 'ENTRY_CUTOFF_MIN', path: 'run.entryCutoffMin' },
-  { env: 'FLATTEN_MIN', path: 'run.flattenMin' },
 
   { env: 'AI_BASE_URL', path: 'ai.baseUrl', parse: (r) => r.trim().replace(/\/+$/, '') },
   { env: 'AI_API_KEY', path: 'ai.apiKey', parse: trim },

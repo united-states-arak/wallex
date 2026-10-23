@@ -1,0 +1,4 @@
+node_modules/
+frames/
+out/*.mp4
+.env.local

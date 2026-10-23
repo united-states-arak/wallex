@@ -7,7 +7,7 @@ import { LEGACY_ALIASES, loadSettings, settingsHash } from '../src/settings'
 const HANDLED_ELSEWHERE: string[] = []
 
 // Variables that are not settings: operational switches, config selection and secrets.
-const ENV_ONLY = ['STARCOACH_MODE', 'STARCOACH_CONFIRM_LIVE', 'STARCOACH_ARGS', 'HEALTH_MAX_AGE_S', 'GIT_SHA', 'STARCOACH_PROFILE', 'STARCOACH_CONFIG_DIR', 'OTEL_EXPORTER_OTLP_HEADERS']
+const ENV_ONLY = ['STARCOACH_MODE', 'STARCOACH_CONFIRM_LIVE', 'STARCOACH_ARGS', 'HEALTH_MAX_AGE_S', 'GIT_SHA', 'STARCOACH_PROFILE', 'STARCOACH_CONFIG_DIR', 'OTEL_EXPORTER_OTLP_HEADERS', 'DASHBOARD_TOKEN']
 
 const problemsOf = (source: Record<string, string>) => {
   try {

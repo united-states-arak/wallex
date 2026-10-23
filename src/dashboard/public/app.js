@@ -611,7 +611,15 @@ async function toggleKill() {
   )
   if (!yes) return
   try {
-    const r = await fetch('/api/stop', { method: 'POST', headers: { 'content-type': 'application/json', 'x-confirm': 'stop' }, body: JSON.stringify({ enabled: !engaged }) })
+    const send = () => fetch('/api/stop', { method: 'POST', headers: { 'content-type': 'application/json', 'x-confirm': 'stop', 'x-dashboard-token': sessionStorage.getItem('sc-token') || '' }, body: JSON.stringify({ enabled: !engaged }) })
+    let r = await send()
+    if (r.status === 401) {
+      const t = window.prompt('Dashboard token (DASHBOARD_TOKEN):')
+      if (t) {
+        sessionStorage.setItem('sc-token', t.trim())
+        r = await send()
+      }
+    }
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status)
     toast(engaged ? 'Kill switch released' : 'Kill switch engaged')
     const s = await fetch('/api/state', { cache: 'no-store' })

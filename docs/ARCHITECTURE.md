@@ -1,38 +1,37 @@
 # Architecture
 
-One Bun process. One strategy object. One `Exchange` interface with three adapters (live, dry, paper), so the strategy code is identical in every mode.
+One Bun process, one strategy object, one `Exchange` interface with three adapters (live, dry, paper). The strategy code is identical in backtest, shadow, dry and live, so what was tested is exactly what trades.
 
 ## Components
 
 ```mermaid
 flowchart LR
     subgraph In["Inputs"]
-        WX["Wallex REST: udf/history 1m, depth, markets"]
+        WX["Wallex REST: 1m candles, depth, markets, account"]
         NW["News: CoinDesk and Cointelegraph RSS, Fear and Greed, CoinGecko trending"]
     end
     subgraph Core["Daemon (src/daemon.ts)"]
-        POLL["Poll loop 20 s: new closed 1m bars"]
-        TICK["Tick loop 5 s: quote and stop check"]
-        STRAT["ICT strategy (src/strategy/ict.ts)"]
-        DET["Detector (src/ict)"]
-        GATE["Gates: spread, net RR, sizing"]
-        SUP["AI supervisor (src/ai)"]
+        POLL["Poll loop, 20 s: new closed 1m bars"]
+        TICK["Tick loop, 5 s: live quotes, stop checks"]
+        STRAT["Trade engine (src/strategy/engine.ts)"]
+        TRK["Signal models: breakout (hourly highs, EMAs, ATR, breadth), washout (15m drops, crash filter)"]
         GUARD["Risk guard (src/risk/guard.ts)"]
+        SUP["AI supervisor agent (src/ai)"]
     end
-    EX["Exchange adapter: live, dry or paper"]
-    OUT[("logs/*.jsonl and state/*.json")]
+    EX["Exchange adapter: live, dry or paper<br/>validation and order sanity check"]
+    OUT[("Decision log logs/*.jsonl, state/*.json")]
     WX --> POLL --> STRAT
     WX --> TICK --> STRAT
-    STRAT --> DET --> GATE --> SUP
-    NW --> SUP
+    STRAT --> TRK
     GUARD --> STRAT
+    STRAT --> SUP
+    NW --> SUP
     SUP --> STRAT
-    STRAT --> EX
-    EX --> WX
+    STRAT --> EX --> WX
     STRAT --> OUT
     SUP --> OUT
     GUARD --> OUT
-    OUT --> DASH["Dashboard (reads the files) and metrics endpoint"]
+    OUT --> DASH["Dashboard, Prometheus metrics, Grafana alerts"]
 ```
 
 ## One decision, in order
@@ -40,115 +39,111 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant P as Poll loop
-    participant S as Strategy
-    participant D as Detector
-    participant G as Guard
+    participant S as Trade engine
+    participant T as Signal models
+    participant G as Risk guard
     participant A as AI supervisor
     participant E as Exchange
-    participant L as Log
-    P->>S: onBar(symbol, 1m bars)
-    S->>E: balances and quotes (equity)
-    S->>G: updateEquity
-    S->>D: findSetup(closed bars only)
-    D-->>S: candidate or null
-    S->>G: blockReason(now)
-    S->>E: quote (spread gate)
-    S->>S: net RR gate and positionSize
-    S->>A: review(candidate, equity, size, open positions)
-    A-->>S: approve, veto or resize plus reason
+    participant L as Decision log
+    P->>S: onBar(symbol, closed 1m bars)
+    S->>T: update (closes the 15m and 1h bars when they end)
+    T-->>S: breakout or washout candidate (breakout first), or nothing
+    S->>G: blockReason, riskPct
+    S->>E: quote (spread, entry price)
+    S->>S: size from the stop (1% of equity, 50% cap)
+    S->>A: review(candidate, equity, size, positions, day PnL)
+    A->>A: get_setup, get_news_digest, submit_verdict
+    A-->>S: approve, shrink or veto, with a reason
     S->>L: setup.accepted or setup.rejected
-    S->>E: limit BUY at the FVG entry
-    E-->>S: ack (NEW, FILLED or REJECTED)
-    S->>L: order.intent, order.ack, entry.placed
+    S->>E: marketable limit BUY
+    E-->>S: ack (FILLED with quantity and average price, or NEW)
+    S->>L: order.intent, order.ack, entry.placed, entry.filled
+    S->>E: resting take-profit SELL (washout)
+    loop every 1m bar and every 5 s quote
+        S->>S: raise the trailing stop (breakout), check stop and time stop
+    end
+    S->>E: limit SELL at the bid when a stop is touched
+    S->>L: stop.trail, stop.hit, tp.filled, exit with PnL
 ```
-
-After the fill the strategy places TP1 and TP2 limit sells. The stop is watched by code, not placed on the exchange (see Failure handling).
 
 ## Module map
 
 | Folder / file | Responsibility |
 |---|---|
-| `src/cli.ts` | Commands `check backtest shadow dry live pullout`, flag parsing |
-| `src/daemon.ts` | Run loop, schedule (cutoff, flatten), state resume, guarded exchange, degraded alarm |
-| `src/strategy/ict.ts` | Setup to order lifecycle: gates, sizing, entry, TPs, stop monitor, exits |
-| `src/ict/` | `primitives.ts` (swings, FVG, displacement, levels), `detect.ts` (`findSetup`), `scan.ts` (setup counting tool), `types.ts` (defaults) |
-| `src/risk/` | `size.ts` (sizing), `guard.ts` (limits, persisted state), `types.ts` |
-| `src/ai/` | `supervisor.ts` (libfx agent), `news.ts`, `mock.ts`, `try.ts` (manual check), `types.ts` |
-| `src/exchange/` | `live.ts`, `dry.ts`, `paper.ts`, `validate.ts` (rounding, min order, blocked markets) |
-| `src/wallex/rest.ts` | REST client: markets, depth, history, balances, open orders, place, cancel |
-| `src/runner/` | `backtest.ts`, `poll.ts` (shadow, dry, daemon feed), `step.ts` |
-| `src/pullout.ts` | Cancel all and sell everything to TMN |
-| `src/research/walk.ts` | Train / test grid, writes `docs/RESEARCH.md` |
-| `src/universe.ts` | `--symbols auto`: 12 liquid TMN markets |
-| `src/data/candles.ts` | Candle cache and aggregation |
-| `src/log.ts` | JSONL logger, git SHA in every line |
-| `src/dashboard/` | Local web dashboard. Separate process that reads `logs/`, `state/` and `STOP`; demo and replay modes |
-| `src/telemetry/otel.ts` | Wraps the logger and turns events into Prometheus / OTLP metrics (`live` command only) |
-| `ops/` | Prometheus, Grafana dashboard and alert rules |
+| `src/cli.ts` | Commands `check backtest shadow dry live pullout`, flag parsing, strategy wiring |
+| `src/daemon.ts` | Run loop, schedule (entry cutoff, run end), state resume, guarded exchange, degraded alarm, graceful shutdown |
+| `src/strategy/engine.ts` | Shared trade engine: one position book, sizing, guard, AI review, entries, take-profits, stops, trailing stops, time stops, persistence, tick stops |
+| `src/strategy/breakout/` | Breakout model: `tracker.ts` (incremental hourly bars, indicators, breadth, signal), `index.ts` |
+| `src/strategy/washout.ts` | Washout bounce model |
+| `src/strategy/index.ts` | `createComboStrategy` (default: breakout + washout) |
+| `src/strategy/ict.ts`, `src/ict/` | The alternative ICT model (`--strategy ict`) |
+| `src/risk/` | `size.ts`, `guard.ts` (day halt, hard halt, profit locks, kill file, persisted state) |
+| `src/ai/` | `supervisor.ts` (libfx agent with three tools), `compat.ts` (provider compatibility), `news.ts` (feeds, sanitisation, caching), `mock.ts`, `try.ts` |
+| `src/exchange/` | `live.ts` (fill parsing, order sanity check), `dry.ts`, `paper.ts` (simulator), `validate.ts` (rounding, minimums, allowed markets) |
+| `src/wallex/rest.ts` | REST client: TLS only, no redirects, bounded responses, identifier validation, redacted errors |
+| `src/security/` | `redact.ts` (secret redaction), `http.ts` (bounded reads, constant-time compare, TLS check) |
+| `src/runner/` | `backtest.ts`, `poll.ts` (live data feed with multi-day warm-up), `step.ts` |
+| `src/pullout.ts` | Cancel everything and sell all holdings to TMN through TMN markets |
+| `src/settings/`, `src/env*.ts` | Typed, layered, validated configuration and environment |
+| `src/dashboard/` | Local web dashboard (live, demo and replay modes) |
+| `src/telemetry/otel.ts` | Prometheus and OTLP metrics derived from the decision log |
+| `arena/` | Strategy tournament harness and the contestants' research code |
+| `ops/` | Prometheus, Grafana dashboard (28 panels) and 10 alert rules |
+
+## Modes
+
+| Mode | Command | Candles | Fills | Adapter | Orders sent |
+|---|---|---|---|---|---|
+| Backtest | `bun run backtest` | Cached history | Simulated with fees, spread and slippage | `PaperExchange` | none |
+| Shadow | `bun run shadow` | Live, 20 s poll | Simulated, virtual 5M TMN | `PaperExchange` | none |
+| Dry | `bun run dry` or `live --dry` | Live | None. Orders validated and logged as `dry.would_send` | `DryExchange` | none |
+| Paper daemon | `bun run live --paper` | Live | Simulated, with the full daemon | `PaperExchange` | none |
+| Live | `bun run live --confirm-live` | Live | Real | `LiveExchange` | real |
+| Pullout | `bun run pullout [--yes]` | none | Real marketable limit sells | `LiveExchange` | with `--yes` only |
+
+All live-data modes preload 8 days of 1-minute candles (`strategy.breakout.warmupDays`), one UTC day per request, cached on disk.
 
 ## Files written at run time
 
-| Path | Content | Git |
-|---|---|---|
-| `logs/<mode>-<ISO time>.jsonl` | Decision log. One JSON object per line: `ts`, `sha`, `event`, data | ignored |
-| `logs/research-*.json` | Raw walk-forward results | ignored |
-| `state/<mode>-run.json` | `runEnd`, `startEquity`, `startedAt`, `sha` | ignored |
-| `state/<mode>-guard.json` | Equity, day peak, halts, loss streak, entry times | ignored |
-| `state/<mode>-strategy.json` | Open positions, pending entries, last 500 setup keys | ignored |
-| `data/candles/<SYMBOL>/<day>.json` | Cached complete UTC days of 1m candles | ignored |
-| `STOP` (repo root, or `risk.killFile`, `control/STOP` in Docker) | Kill switch. Existence blocks entries | ignored |
+| Path | Content |
+|---|---|
+| `logs/<command>-<ISO time>.jsonl` | Decision log (`backtest-`, `shadow-`, `dry-`, `pullout-`; the daemon writes `live-` in every mode). One JSON object per line with `ts`, `sha` (git commit), `event` and data. Owner-only, redacted |
+| `state/<mode>-run.json` | `runEnd`, `startEquity`, `startedAt`, `sha` |
+| `state/<mode>-guard.json` | Equity, day peak, halts, loss count |
+| `state/<mode>-strategy.json` | Open positions and pending entries with their stops |
+| `data/candles/<SYMBOL>/<day>.json` | Cached complete UTC days of 1m candles |
+| `STOP` | Kill switch. Its existence blocks new entries |
 
-Key events: `daemon.start`, `daemon.heartbeat` (every poll cycle), `setup.accepted`, `setup.rejected`, `ai.verdict`, `order.intent`, `order.ack`, `exchange.place`, `entry.placed`, `entry.filled`, `tp.placed`, `tp.filled`, `stop.hit`, `exit`, `daemon.flatten`, `daemon.stop`.
-
-## Mode matrix
-
-| Mode | Command | Candles | Fills | Exchange adapter | Orders sent |
-|---|---|---|---|---|---|
-| backtest | `backtest --strategy ict` | Cached history | Paper rules, entry on bar i fills from bar i+1 | `PaperExchange` | none |
-| shadow | `shadow --strategy ict` | Live poll, 20 s | Paper rules, virtual 5M TMN | `PaperExchange` | none |
-| dry | `dry --strategy ict` or `live --dry` | Live poll | None. Orders validated, request logged as `dry.would_send` | `DryExchange` | none |
-| paper daemon | `live --paper` | Live poll | Paper rules | `PaperExchange` | none |
-| live | `live` | Live poll | Real | `LiveExchange` | real |
-| pullout | `pullout [--yes]` | none | Real, marketable limit sells | `LiveExchange` | real with `--yes` only |
-
-Backtest and shadow use `withGuardFeed` (guard sees equity and entries, no daemon). `live` modes also get state files, schedule, tick loop and flatten.
+Key events: `daemon.start`, `daemon.heartbeat`, `strategy.primed`, `setup.accepted`, `setup.rejected`, `ai.verdict`, `order.intent`, `order.ack`, `exchange.place`, `entry.placed`, `entry.filled`, `tp.placed`, `stop.trail`, `stop.hit`, `tp.filled`, `exit`, `pullout.*`, `daemon.stop`. Safety events: `entry.uncertain` and `entry.unconfirmed` (an order reply was lost or a fill is not yet visible in the balance; the trade is reconciled instead of dropped), `exit.unsellable` (a remainder below the market minimum), `order.cancel_failed`, `order.open_orders_failed`, `state.restore_skipped` and `daemon.restore_incomplete` (a saved position could not be restored, with a console warning).
 
 ## Failure handling and restart
 
 | Situation | Behaviour |
 |---|---|
-| History call fails | Logged as `daemon.api_error`, poll interval backs off (20 s doubling, max 60 s) |
-| Quote call fails for one symbol | That symbol backs off (5 s doubling, max 60 s), others continue |
-| Strategy throws | Caught, logged `daemon.strategy_error`, loop continues |
-| API down 5 min with positions open | `daemon.degraded` plus a console alarm every 60 s: stops are not being executed |
-| AI slow or down | Fallback verdict after `AI_TIMEOUT_MS` (default approve, see AI.md) |
-| Equity cannot be priced | Guard keeps its last equity, no wrong value is fed |
-| SIGINT / SIGTERM | Stop entries, cancel pending BUY orders, save state, report. A second signal exits at once |
-| Process killed with positions | Positions stay on the exchange, **stops are unprotected** until restart |
-| Restart, same mode and same `RUN_END` | State is resumed: guard, open positions, pending entries |
-| Restart with a different `RUN_END` | Saved strategy state with open positions or pending entries is **kept** and restored, with a console warning and a `daemon.state_kept` event (the guard starts fresh). A flat state is discarded. If the positions were already sold, delete `state/<mode>-strategy.json` |
-| `RUN_END` already past | Start aborted |
-| Live start without key, no TMN entry or zero TMN | Start aborted |
-| End of run | Entries off at `RUN_END` minus 45 min, flatten from minus 15 min (retried every 60 s until flat), exit code 1 if not flat |
+| Candle request fails | Logged as `daemon.api_error`; the poll interval backs off (20 s doubling, at most 60 s) |
+| Quote request fails for one market | That market backs off (5 s doubling, at most 60 s); the others continue |
+| Strategy throws | Caught and logged as `daemon.strategy_error`; the loop continues |
+| Exchange unreachable for 5 minutes with positions open | `daemon.degraded` event and a console alarm every 60 s |
+| AI slow or down | A fallback verdict after `AI_TIMEOUT_MS` (12 s); the reason is logged |
+| Provider quirks | `src/ai/compat.ts` adapts reasoning-model and content-filter differences automatically |
+| SIGINT or SIGTERM | Stop entries, cancel pending buys, save state, report. A second signal exits at once |
+| Restart with the same `RUN_END` | Guard history, open positions and their stops are restored |
+| Restart with a different `RUN_END` | Open positions and pending entries are kept and restored; a flat state starts fresh |
+| `RUN_END` reached | Pending buys are cancelled and the daemon exits; holdings are converted with `bun run pullout --yes` |
 
-## Configuration layering and typed environment
+## Configuration
 
 ```mermaid
 flowchart TB
     D["Code defaults (src/settings/defaults.ts)"] --> F1["config/default.toml"]
     F1 --> F2["config/profiles/NAME.toml (STARCOACH_PROFILE)"]
-    F2 --> F3["config/local.toml (gitignored)"]
-    F3 --> E["Environment: legacy names + STARCOACH__section__key"]
+    F2 --> F3["config/local.toml (git-ignored)"]
+    F3 --> E["Environment: legacy names and STARCOACH__section__key"]
     E --> S["getSettings(): one frozen, validated Settings object"]
-    ENV["src/env.ts: createEnv + zod, exit 78 on a bad value"] --> E
-    ENV --> OP["Env-only: secrets, STARCOACH_MODE, STARCOACH_CONFIRM_LIVE, STARCOACH_ARGS, HEALTH_MAX_AGE_S, GIT_SHA"]
 ```
 
-- `src/env.ts` is the single typed entry for environment variables. Importing it validates `process.env` once (the CLI, the daemon log module and `bun run config` do), prints every problem and exits 78.
-- The settings loader builds its environment layer from the same schema (`src/env-schema.ts`), so a bad legacy variable fails with the other config problems. The dynamic `STARCOACH__section__key` overrides and the alias table (`LEGACY_ALIASES`, `src/settings/aliases.ts`) are still parsed by the loader. A test checks that every alias has a schema entry.
-- Ranges and cross-field rules live only in `src/settings/validate.ts`. The env schema checks types and formats.
-- Wiring: the CLI reads `market.universe.auto`, `wallex.pollMs`, `run.defaultHours`, `research.defaultDays`; the daemon reads `run.*`, `wallex.tickMs`, `wallex.pollMs`, `logging.stateDir`, `risk.killFile`; telemetry reads `telemetry.*`. The config hash (`settingsHash`) is in the startup banner and `daemon.start`.
+`bun run config show` prints every effective value with the layer it came from, `bun run config validate` checks the environment and every profile, and `bun run config hash` prints the hash that is also written to the log at start.
 
 ## Docker
 
-One image runs the daemon (`docker/entrypoint.sh`: validate env and config, print the hash, check the live confirmation, then `bun src/cli.ts live`) and, with another command, the dashboard or `pullout`. Compose mounts `config/` (read-only), `state/`, `logs/`, `data/` and `control/`, so state survives restarts. The healthcheck (`docker/healthcheck.ts`) looks for a `logs/live-*.jsonl` file (in `logging.dir`) written within the last 180 s. See OPERATIONS.md section 10.
+One image runs the daemon (`docker/entrypoint.sh` validates environment and config, prints the config hash, requires live confirmation, then starts `bun src/cli.ts live`) and, with another command, the dashboard or `pullout`. Compose runs both services hardened (non-root, read-only root filesystem, no capabilities, no new privileges, resource limits) and publishes ports on `127.0.0.1` only. See [SECURITY.md](SECURITY.md) and [OPERATIONS.md](OPERATIONS.md).

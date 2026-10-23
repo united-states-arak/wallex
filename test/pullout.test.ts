@@ -11,10 +11,12 @@ function seeded() {
   return ex
 }
 
-test('plan routes TMN direct, USDT via USDTTMN, and flags dust', async () => {
+test('plan sells through TMN markets only, never a USDT-quoted market, and flags dust', async () => {
   const plan = await planPullout(seeded(), meta)
-  expect(plan.sells.map((h) => h.symbol).sort()).toEqual(['PEPETMN', 'XYZUSDT'])
+  expect(plan.sells.map((h) => h.symbol)).toEqual(['PEPETMN'])
+  expect(plan.unroutable).toEqual(['XYZ'])
   expect(plan.dust.map((h) => h.asset)).toEqual(['USDT'])
+  expect(plan.dust[0]!.qty).toBe(0.1) // dust shows the real holding, not the floored sell quantity
 })
 
 test('dry plan does not touch balances', async () => {
@@ -30,7 +32,8 @@ test('execute converts every sellable asset into TMN', async () => {
   const b = await ex.balances()
   expect(r.remaining).toEqual([])
   expect(b.PEPE!.free).toBe(0)
-  expect(b.XYZ!.free).toBe(0)
+  expect(b.XYZ!.free).toBe(100) // no TMN market: reported as unroutable and left alone
+  expect(r.unroutable).toEqual(['XYZ'])
   expect(b.USDT!.free).toBeLessThan(5)
   expect(b.TMN!.free).toBeGreaterThan(100_000 + 10_000_000 * 1.1)
 })
@@ -42,4 +45,22 @@ test('resting orders are cancelled and their funds sold', async () => {
   await pullout(ex, meta, { execute: true, waitMs: 0 })
   expect((await ex.openOrders()).length).toBe(0)
   expect((await ex.balances()).PEPE!.free + (await ex.balances()).PEPE!.locked).toBe(0)
+})
+
+test('a failing cancel does not stop the pullout', async () => {
+  const ex = seeded()
+  await ex.place({ clientId: 'rest2', symbol: 'PEPETMN', side: 'SELL', type: 'LIMIT', price: 2, quantity: 1_000_000, reason: 'test' })
+  const real = ex.cancel.bind(ex)
+  let failed = false
+  ex.cancel = async (id: string) => {
+    if (!failed) {
+      failed = true
+      throw new Error('404 not_found_error')
+    }
+    return real(id)
+  }
+  const events: string[] = []
+  const r = await pullout(ex, meta, { execute: true, waitMs: 0, log: (e) => void events.push(e) })
+  expect(events).toContain('pullout.cancel_failed')
+  expect(r.executed).toBe(true)
 })
