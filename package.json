@@ -28,7 +28,7 @@
     "@opentelemetry/resources": "^3.0.0",
     "@opentelemetry/sdk-metrics": "^3.0.0",
     "@t3-oss/env-core": "^0.13.11",
-    "libfx": "0.0.14",
+    "libfx": "0.0.16",
     "zod": "^4.1.0"
   }
 }
